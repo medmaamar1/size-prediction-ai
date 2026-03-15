@@ -8,14 +8,31 @@ import numpy as np
 
 class BodyMDataset(Dataset):
     """
-    Official BodyM Dataset Loader (Paper Compliant).
-    Loads paired silhouettes and metadata as a 3-channel image (640x960).
+    Kaggle-Aware BodyM Dataset Loader.
+    Handles joining measurements.csv, hwg_metadata.csv, and subject_to_photo_map.csv.
+    Loads front/side silhouettes from mask/ and mask_left/ folders.
     """
-    def __init__(self, csv_path, images_dir, transform=None):
-        self.df = pd.read_csv(csv_path)
-        # Standardize column naming
-        self.df.columns = self.df.columns.str.lower().str.replace(' ', '_').str.replace('-', '_')
-        self.images_dir = images_dir
+    def __init__(self, base_dir, split='train', transform=None):
+        self.base_dir = os.path.join(base_dir, split)
+        
+        # 1. Load sub-CSVs
+        meas_df = pd.read_csv(os.path.join(self.base_dir, 'measurements.csv'))
+        hwg_df  = pd.read_csv(os.path.join(self.base_dir, 'hwg_metadata.csv'))
+        photo_map_df = pd.read_csv(os.path.join(self.base_dir, 'subject_to_photo_map.csv'))
+        
+        # Standardize columns
+        for df in [meas_df, hwg_df, photo_map_df]:
+            df.columns = df.columns.str.lower().str.replace(' ', '_').str.replace('-', '_')
+            
+        # 2. Join Metadata
+        # Merge measurements with height/weight/gender
+        self.df = pd.merge(meas_df, hwg_df, on='subject_id')
+        
+        # 3. Map to Photos
+        # photo_map_df typically maps subject_id to filenames
+        # We assume one front and one side photo per subject for this simplified loader
+        # Filter for subjects that have both front and side entries in the map if necessary
+        self.df = pd.merge(self.df, photo_map_df, on='subject_id')
         
         # Paper targets (14 measurements)
         self.target_cols = [
@@ -26,7 +43,8 @@ class BodyMDataset(Dataset):
         ]
         
         # Filtering for data integrity
-        self.df = self.df.dropna(subset=self.target_cols + ['front_image', 'side_image'])
+        cols_to_check = self.target_cols + ['height_cm', 'weight_kg', 'photo_id']
+        self.df = self.df.dropna(subset=[c for c in cols_to_check if c in self.df.columns])
         self.df = self.df.reset_index(drop=True)
 
     def __len__(self):
@@ -35,41 +53,42 @@ class BodyMDataset(Dataset):
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
         
-        # 1. Load and Preprocess Silhouettes (640x480)
-        front_path = os.path.join(self.images_dir, str(row['front_image']))
-        side_path  = os.path.join(self.images_dir, str(row['side_image']))
+        # 1. Load and Preprocess Silhouettes (using Kaggle structure)
+        # Assuming photo_id corresponds to the filename in mask/ and mask_left/
+        photo_id = str(row['photo_id'])
+        if not photo_id.endswith('.png'):
+            photo_id += '.png'
+            
+        front_path = os.path.join(self.base_dir, 'mask', photo_id)
+        side_path  = os.path.join(self.base_dir, 'mask_left', photo_id)
         
         # Convert to single channel (grayscale) then resize
-        front_img = Image.open(front_path).convert('L').resize((480, 640)) # (W=480, H=640)
+        front_img = Image.open(front_path).convert('L').resize((480, 640)) 
         side_img  = Image.open(side_path).convert('L').resize((480, 640))
         
         # 2. Horizontal Concatenation (640 x 960)
-        # Create a new image container
         combined_sil = Image.new('L', (960, 640))
         combined_sil.paste(front_img, (0, 0))
         combined_sil.paste(side_img, (480, 0))
         
         # Convert to tensor and normalize silhouette to [0, 1]
-        sil_tensor = transforms.ToTensor()(combined_sil) # (1, 640, 960)
+        sil_tensor = transforms.ToTensor()(combined_sil) 
         
-        # 3. Create Metadata Channels (Dynamic Z-score Normalization)
-        # Instead of hardcoded 250/200, we use Z-score (x - mean) / std
-        # These stats should be calculated from the training set and saved for inference.
+        # 3. Metadata Channels (Height/Weight)
         h_val = float(row['height_cm'])
         w_val = float(row['weight_kg'])
         
-        # Default stats (if not provided, we calculate them from the dataframe later)
-        # Typically: height_mean ~ 170, std ~ 10 | weight_mean ~ 75, std ~ 15
+        # Z-score Normalization (Paper stats)
         h_norm = (h_val - 170.0) / 10.0
         w_norm = (w_val - 75.0) / 15.0
         
         h_channel = torch.full((1, 640, 960), h_norm)
         w_channel = torch.full((1, 640, 960), w_norm)
         
-        # 4. Stack final 3D tensor (Silhouettes, Height, Weight)
-        input_tensor = torch.cat((sil_tensor, h_channel, w_channel), dim=0) # (3, 640, 960)
+        # 4. Stack final 3D tensor
+        input_tensor = torch.cat((sil_tensor, h_channel, w_channel), dim=0) 
         
-        # 5. Targets (14 measurements)
+        # 5. Targets
         targets = torch.tensor(row[self.target_cols].values.astype(float), dtype=torch.float32)
         
         return input_tensor, targets

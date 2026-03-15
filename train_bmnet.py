@@ -21,9 +21,14 @@ def train_bmnet():
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.L1Loss() # MAE Loss as per paper
     
-    # 3. Data Loaders
-    # dataset = BodyMDataset(csv_path='train.csv', images_dir='images')
-    # train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    # 3. Data Loaders (Kaggle Integration)
+    kaggle_base = '/kaggle/input/datasets/maamarmohamed/bodym-dataset/bodym'
+    
+    train_dataset = BodyMDataset(base_dir=kaggle_base, split='train')
+    train_loader  = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    
+    val_dataset   = BodyMDataset(base_dir=kaggle_base, split='testA') # Using testA as validation
+    val_loader    = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     
     # Initialize SMPL Generator for ABS
     smpl_gen = SMPLDataGenerator(model_path='models/smpl')
