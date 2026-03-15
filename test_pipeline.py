@@ -1,10 +1,8 @@
+import compat_patch
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-import inspect
-if not hasattr(inspect, 'getargspec'):
-    inspect.getargspec = inspect.getfullargspec
 from PIL import Image
 from network import BMNet
 from smpl_generator import SMPLDataGenerator

@@ -1,9 +1,7 @@
+import compat_patch
 import os
 import numpy as np
 import torch
-import inspect
-if not hasattr(inspect, 'getargspec'):
-    inspect.getargspec = inspect.getfullargspec
 import smplx
 import trimesh
 from PIL import Image

@@ -17,14 +17,12 @@ Usage:
     print(result)
 """
 
+import compat_patch
 import os
 import json
 import math
 import numpy as np
 import cv2
-import inspect
-if not hasattr(inspect, 'getargspec'):
-    inspect.getargspec = inspect.getfullargspec
 import xgboost as xgb
 import mediapipe as mp
 
