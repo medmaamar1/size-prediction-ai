@@ -13,25 +13,59 @@ class SMPLDataGenerator:
     def __init__(self, model_path=None, gender='neutral'):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
-        # Kaggle-specific paths provided by user
-        KAGGLE_BASE = "/kaggle/input/datasets/maamarmohamed/smpl-generator/SMPL_python_v.1.1.0/smpl/models"
+        # Standard SMPL model names expected by smplx library
+        MODEL_NAMES = {
+            'neutral': 'SMPL_NEUTRAL.pkl',
+            'female':  'SMPL_FEMALE.pkl',
+            'male':    'SMPL_MALE.pkl'
+        }
         
-        if model_path is None:
-            # Default to Kaggle path if no path provided
-            if gender == 'neutral':
-                model_file = os.path.join(KAGGLE_BASE, "basicmodel_neutral_lbs_10_207_0_v1.1.0.pkl")
-            elif gender == 'female':
-                model_file = os.path.join(KAGGLE_BASE, "basicmodel_f_lbs_10_207_0_v1.1.0.pkl")
-            else:
-                model_file = os.path.join(KAGGLE_BASE, "basicmodel_m_lbs_10_207_0_v1.1.0.pkl")
-        else:
-            # Fallback to local path logic if model_path is provided
-            model_file = model_path
+        # Kaggle-specific source path (Read-only)
+        KAGGLE_SRC = "/kaggle/input/datasets/maamarmohamed/smpl-generator/SMPL_python_v.1.1.0/smpl/models"
+        
+        # Local writable path for symlinking with standard names
+        KAGGLE_WORKING = "/kaggle/working/smpl_models"
 
-        # Initializing smplx with the specific file
-        # Note: smplx.create usually takes a folder, but we can pass the path directly or manage the file naming.
-        # Given the Kaggle structure, we'll initialize the model using the .pkl file directly.
-        self.model = smplx.create(model_file, model_type='smpl', gender=gender, ext='pkl').to(self.device).eval()
+        if model_path is None:
+            if os.path.exists(KAGGLE_SRC):
+                # 1. Setup Kaggle writable directory
+                os.makedirs(KAGGLE_WORKING, exist_ok=True)
+                
+                # 2. Map the "basicmodel" files to standard SMPL names
+                mappings = {
+                    'neutral': "basicmodel_neutral_lbs_10_207_0_v1.1.0.pkl",
+                    'female':  "basicmodel_f_lbs_10_207_0_v1.1.0.pkl",
+                    'male':    "basicmodel_m_lbs_10_207_0_v1.1.0.pkl"
+                }
+                
+                src = os.path.join(KAGGLE_SRC, mappings.get(gender, mappings['neutral']))
+                dst = os.path.join(KAGGLE_WORKING, MODEL_NAMES.get(gender, MODEL_NAMES['neutral']))
+                
+                if os.path.exists(src) and not os.path.exists(dst):
+                    try:
+                        os.symlink(src, dst)
+                    except:
+                        import shutil
+                        shutil.copy(src, dst)
+                
+                model_dir = KAGGLE_WORKING
+            else:
+                # Fallback to local default
+                model_dir = "models/smpl"
+        else:
+            # If path is provided, check if it's a file or directory
+            if os.path.isfile(model_path):
+                model_dir = os.path.dirname(model_path)
+            else:
+                model_dir = model_path
+
+        # 3. Create model using the directory path
+        # smplx.create expects a directory and searches for SMPL_GENDER.pkl inside
+        try:
+            self.model = smplx.create(model_dir, model_type='smpl', gender=gender, ext='pkl').to(self.device).eval()
+        except Exception as e:
+            print(f"Error loading SMPL model from {model_dir}: {e}")
+            raise e
         
         # Ground Truth Measurements (14 as per paper)
         self.target_cols = [
