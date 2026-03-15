@@ -54,7 +54,7 @@ class SMPLDataGenerator:
                 model_dir = KAGGLE_WORKING
             else:
                 # Fallback to local default
-                model_dir = "models/smpl"
+                model_dir = "smpl_models"
         else:
             # If path is provided, check if it's a file or directory
             if os.path.isfile(model_path):

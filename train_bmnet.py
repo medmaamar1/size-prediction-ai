@@ -33,7 +33,7 @@ def train_bmnet():
     val_loader    = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     
     # Initialize SMPL Generator for ABS
-    smpl_gen = SMPLDataGenerator(model_path='models/smpl')
+    smpl_gen = SMPLDataGenerator()
     
     print(f"Starting training on {device}...")
     
