@@ -24,12 +24,14 @@ class SMPLDataGenerator:
         KAGGLE_SRC = "/kaggle/input/datasets/maamarmohamed/smpl-generator/SMPL_python_v.1.1.0/smpl/models"
         
         # Local writable path for symlinking with standard names
+        # smplx expects a subfolder named 'smpl' for model_type='smpl'
         KAGGLE_WORKING = "/kaggle/working/smpl_models"
+        KAGGLE_SMPL_DIR = os.path.join(KAGGLE_WORKING, "smpl")
 
         if model_path is None:
             if os.path.exists(KAGGLE_SRC):
-                # 1. Setup Kaggle writable directory
-                os.makedirs(KAGGLE_WORKING, exist_ok=True)
+                # 1. Setup Kaggle writable directory structure
+                os.makedirs(KAGGLE_SMPL_DIR, exist_ok=True)
                 
                 # 2. Map the "basicmodel" files to standard SMPL names
                 mappings = {
@@ -39,7 +41,7 @@ class SMPLDataGenerator:
                 }
                 
                 src = os.path.join(KAGGLE_SRC, mappings.get(gender, mappings['neutral']))
-                dst = os.path.join(KAGGLE_WORKING, MODEL_NAMES.get(gender, MODEL_NAMES['neutral']))
+                dst = os.path.join(KAGGLE_SMPL_DIR, MODEL_NAMES.get(gender, MODEL_NAMES['neutral']))
                 
                 if os.path.exists(src) and not os.path.exists(dst):
                     try:
