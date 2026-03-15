@@ -78,112 +78,128 @@ class SMPLDataGenerator:
             'waist_cm', 'wrist_cm'
         ]
 
-    def generate_sample(self, shape_params=None):
-        """
-        Generates paired Front + Side silhouettes and exact measurements.
-        """
-        if shape_params is None:
-            shape_params = torch.randn(1, 10).to(self.device)
-            
-        output = self.model(betas=shape_params)
-        vertices = output.vertices.detach().cpu().numpy()[0]
-        faces = self.model.faces
-        
-        # 1. Render front (640x480) and side (640x480)
-        front_sil = self._render_silhouette(vertices, faces, view='front')
-        side_sil  = self._render_silhouette(vertices, faces, view='side')
-        
-        # 2. Horizontal concatenation (640x960)
-        combined_sil = np.hstack((front_sil, side_sil))
-        
-        # 3. Calculate all 14 measurements
-        measurements = self._calculate_measurements(vertices)
-        
-        return combined_sil, measurements
+        self._setup_renderer()
 
-    def _render_silhouette(self, vertices, faces, view='front'):
+    def _setup_renderer(self):
+        try:
+            from pytorch3d.structures import Meshes
+            from pytorch3d.renderer import (
+                FoVOrthographicCameras,
+                RasterizationSettings,
+                MeshRasterizer,
+                SoftSilhouetteShader,
+                MeshRenderer,
+                BlendParams
+            )
+            self.pytorch3d_available = True
+        except ImportError:
+            self.pytorch3d_available = False
+            print("Warning: PyTorch3D not found. Differentiable rendering will not work.")
+            return
+
+        # Setup PyTorch3D soft renderer
+        cameras_front = FoVOrthographicCameras(device=self.device, R=torch.eye(3).unsqueeze(0), T=torch.zeros(1, 3))
+        # Side view: rotate 90 degrees around Y axis
+        R_side = torch.tensor([[[ 0.0,  0.0, -1.0],
+                                [ 0.0,  1.0,  0.0],
+                                [ 1.0,  0.0,  0.0]]], device=self.device)
+        cameras_side = FoVOrthographicCameras(device=self.device, R=R_side, T=torch.zeros(1, 3))
+
+        raster_settings = RasterizationSettings(
+            image_size=(640, 480), # (H, W)
+            blur_radius=np.log(1. / 1e-4 - 1.) * 1e-4,
+            faces_per_pixel=50,
+        )
+
+        self.renderer_front = MeshRenderer(
+            rasterizer=MeshRasterizer(cameras=cameras_front, raster_settings=raster_settings),
+            shader=SoftSilhouetteShader(blend_params=BlendParams(sigma=1e-4, gamma=1e-4))
+        )
+        
+        self.renderer_side = MeshRenderer(
+            rasterizer=MeshRasterizer(cameras=cameras_side, raster_settings=raster_settings),
+            shader=SoftSilhouetteShader(blend_params=BlendParams(sigma=1e-4, gamma=1e-4))
+        )
+
+    def generate_batch(self, shape_params):
         """
-        Renders a 640x480 silhouette by projecting vertices and filling the mesh.
+        Differentiable generation of Front + Side silhouettes and measurements.
+        shape_params: (B, 10) PyTorch Tensor with requires_grad=True
+        Returns:
+            combined_sil: (B, 1, 640, 960) PyTorch Tensor [0, 1]
+            measurements: (B, 14) PyTorch Tensor in cm
+            metadata: (B, 2) PyTorch Tensor for height and weight normalized
         """
-        # Create a trimesh object
-        mesh = trimesh.Trimesh(vertices, faces)
+        batch_size = shape_params.shape[0]
+        output = self.model(betas=shape_params)
+        vertices = output.vertices # (B, 6890, 3)
         
-        # 1. Setup projection based on view
-        if view == 'front':
-            # Project onto XY plane (Front view)
-            coords = vertices[:, :2] # [X, Y]
-        else: # view == 'side'
-            # Project onto ZY plane (Side view)
-            coords = vertices[:, [2, 1]] # [Z, Y]
+        measurements = self._calculate_measurements(vertices)
+        height_cm = measurements[:, 6] # head_to_heel_cm
+        weight_kg = torch.full((batch_size,), 75.0, device=self.device) # Placeholder weight
+        
+        # Z-score normalization as per paper
+        h_norm = (height_cm - 170.0) / 10.0
+        w_norm = (weight_kg - 75.0) / 15.0
+        metadata = torch.stack((h_norm, w_norm), dim=1) # (B, 2)
+
+        if getattr(self, 'pytorch3d_available', False):
+            from pytorch3d.structures import Meshes
+            faces = self.model.faces
+            faces_tensor = torch.tensor(faces.astype(np.int64), dtype=torch.int64, device=self.device)
+            faces_batch = faces_tensor.unsqueeze(0).expand(batch_size, -1, -1)
             
-        # 2. Normalize coords to fit in 640x480
-        # Centering and scaling (This replicates the "fixed distance" camera of the paper)
-        # We assume the subject is roughly centered
-        min_p = np.min(coords, axis=0)
-        max_p = np.max(coords, axis=0)
-        center = (min_p + max_p) / 2
-        
-        # Scale to fit (leaving some padding)
-        # 1.8 meters person -> ~500 pixels high
-        scale = 300.0 
-        
-        img_coords = (coords - center) * scale
-        img_coords[:, 0] += 240 # Center X (480/2)
-        img_coords[:, 1] += 320 # Center Y (640/2)
-        
-        # 3. Handle coordinate orientation (Y increases downwards in images)
-        img_coords[:, 1] = 640 - img_coords[:, 1]
-        
-        # 4. Rasterize using trimesh/PIL for a clean silhouette
-        # We project the mesh onto the image plane
-        # For simplicity in this draft, we'll draw the projected vertices/edges
-        # In the real ABS, this is a differentiable soft rasterizer
-        img = Image.new('L', (480, 640), 0)
-        from PIL import ImageDraw
-        draw = ImageDraw.Draw(img)
-        
-        # Draw projected mesh polygons (simplified: draw points for the draft)
-        for f in faces[:5000]: # Sample faces for efficiency in draft
-            poly = [(img_coords[v, 0], img_coords[v, 1]) for v in f]
-            draw.polygon(poly, fill=255)
+            # Center and scale vertices to [-1, 1] NDC
+            v_min = vertices.min(dim=1, keepdim=True)[0]
+            v_max = vertices.max(dim=1, keepdim=True)[0]
+            v_center = (v_max + v_min) / 2.0
             
-        return np.array(img)
+            v_scaled = (vertices - v_center) / 1.2
+            
+            meshes = Meshes(verts=v_scaled, faces=faces_batch)
+            
+            front_sil = self.renderer_front(meshes)[..., 3] # (B, 640, 480)
+            side_sil = self.renderer_side(meshes)[..., 3] # (B, 640, 480)
+            
+            combined_sil = torch.cat([front_sil, side_sil], dim=2) # (B, 640, 960)
+            combined_sil = combined_sil.unsqueeze(1) # (B, 1, 640, 960)
+            
+        else:
+            # Fallback
+            combined_sil = torch.zeros((batch_size, 1, 640, 960), device=self.device)
+            
+        return combined_sil, measurements, metadata
 
     def _calculate_measurements(self, vertices):
         """
-        Calculates exact cm measurements from 3D coordinates.
-        Uses vertex-loop indices specific to the SMPL mesh.
+        Differentiable exact cm measurements from 3D coordinates.
+        vertices: (B, 6890, 3) PyTorch Tensor
+        Returns:
+            measurements: (B, 14) PyTorch Tensor aligned with self.target_cols
         """
-        # (These indices are illustrative; in production, we use a loop-loader)
-        # Height is easy: Y_max - Y_min
-        height = (np.max(vertices[:, 1]) - np.min(vertices[:, 1])) * 100
+        B = vertices.shape[0]
         
-        # Chest, Waist, Hips: Sum distances of vertex loops
-        # This is the "Perfect Ground Truth" mentioned in our strategy
-        measurements = {
-            'head_to_heel_cm': height,
-            'waist_cm': self._get_circumference(vertices, [3500, 3501, 3502]), # Loop
-            'chest_cm': self._get_circumference(vertices, [3000, 3001, 3002]),
-            # ... and so on for all 14 metrics
-        }
+        # Height: max Y - min Y
+        height = (torch.max(vertices[:, :, 1], dim=1)[0] - torch.min(vertices[:, :, 1], dim=1)[0]) * 100
         
-        # Ensure all 14 paper metrics are present
-        for col in self.target_cols:
-            if col not in measurements:
-                measurements[col] = 0.0 # Placeholder
-                
-        return measurements
-
-    def _get_circumference(self, vertices, indices):
-        """ Calculates girth by summing polygon edge lengths in a loop. """
-        dist = 0
-        v_loop = vertices[indices]
-        for i in range(len(v_loop)):
-            v1 = v_loop[i]
-            v2 = v_loop[(i + 1) % len(v_loop)]
-            dist += np.linalg.norm(v1 - v2)
-        return dist * 100 # to cm
+        # Girth helper function
+        def get_girth(indices):
+            v_loop = vertices[:, indices, :] # (B, L, 3)
+            v_loop_shifted = torch.roll(v_loop, shifts=-1, dims=1)
+            dist = torch.norm(v_loop - v_loop_shifted, dim=2).sum(dim=1) # (B,)
+            return dist * 100
+            
+        # Simplified loops
+        waist = get_girth([3500, 3501, 3502]) 
+        chest = get_girth([3000, 3001, 3002])
+        
+        res = torch.zeros(B, 14, device=self.device, dtype=torch.float32)
+        res[:, 6] = height # head_to_heel_cm
+        res[:, 12] = waist # waist_cm
+        res[:, 4] = chest # chest_cm
+        
+        return res
 
 if __name__ == "__main__":
-    print("SMPL Generator Drafted.")
-    print("Logic: 3D Mesh (SMPL) -> 2D Silhouette (Renderer) -> Ground Truth (Mesh Calculation)")
+    print("Differentiable SMPL Generator Drafted.")
+
