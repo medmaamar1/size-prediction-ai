@@ -41,8 +41,8 @@ def evaluate():
     else:
         state_dict = checkpoint
         
-    from collections import OrderedDict
-    new_state_dict = OrderedDict()
+    new_state_dict = { (k[7:] if k.startswith('module.') else k): v for k, v in state_dict.items() }
+    
     # Bypassing MNASNet version check bug by direct parameter assignment
     model_state = model.state_dict()
     matched_keys = 0
