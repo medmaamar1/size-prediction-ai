@@ -64,12 +64,14 @@ def evaluate():
 
     # 3. Evaluation Loop per Split
     for split in splits:
-        print(f"\nEvaluating on {split}...")
+        print(f"\n" + "-"*20)
+        print(f"🔍 Evaluating on {split}...")
         dataset = BodyMDataset(kaggle_base, split=split)
         if len(dataset) == 0:
             print(f"⚠️ Warning: Split {split} is empty or not found.")
             continue
             
+        print(f"Dataset columns found: {list(dataset.df.columns)[:10]}...")
         loader = DataLoader(dataset, batch_size=8, shuffle=False, num_workers=2)
         
         split_total_mae = 0
@@ -77,36 +79,44 @@ def evaluate():
         per_metric_mae = np.zeros(14)
         per_metric_counts = np.zeros(14)
         
+        # Diagnostic: Check first sample
+        test_img, test_target = dataset[0]
+        print(f"First Sample Info:")
+        print(f"   - Input Shape: {test_img.shape}")
+        print(f"   - Silh Mean: {test_img[0].mean():.4f} (Should be > 0 if images loaded)")
+        print(f"   - Height Channel Val: {test_img[1, 0, 0]:.4f}")
+        print(f"   - Weight Channel Val: {test_img[2, 0, 0]:.4f}")
+
         with torch.no_grad():
             for i, (images, measurements) in enumerate(loader):
                 images = images.to(device)
                 measurements = measurements.to(device)
                 preds = model(images)
                 
-                # Mask out zero targets (missing data) to avoid skewing error
+                if i == 0:
+                    print(f"First Batch Raw Comparisons:")
+                    print(f"   - Sample 0 Preds:   {preds[0][:5].cpu().numpy()}")
+                    print(f"   - Sample 0 Targets: {measurements[0][:5].cpu().numpy()}")
+                
+                # Mask out zero targets (missing data)
                 mask = (measurements > 0).float()
                 error = torch.abs(preds - measurements) * mask
                 
-                # Update totals
                 split_total_mae += error.sum().item()
                 split_num_samples += mask.sum().item()
                 
-                # Update per-metric
                 per_metric_mae += error.sum(dim=0).cpu().numpy()
                 per_metric_counts += mask.sum(dim=0).cpu().numpy()
         
         avg_mae = split_total_mae / max(1, split_num_samples)
         results[split] = avg_mae
-        print(f"✅ {split} MAE: {avg_mae:.4f} cm (filtered missing data)")
+        print(f"\n✅ {split} MAE: {avg_mae:.4f} cm")
         
-        # Print per-metric breakdown for this split
-        print(f"\nDetail for {split}:")
+        print(f"Metric Breakdown (MAE in cm):")
         for idx, name in enumerate(metrics_names):
             if per_metric_counts[idx] > 0:
                 m_mae = per_metric_mae[idx] / per_metric_counts[idx]
-                print(f"      - {name.ljust(12)}: {m_mae:.2f} cm")
-            else:
-                print(f"      - {name.ljust(12)}: N/A (No data)")
+                print(f"   {name.ljust(12)}: {m_mae:.2f}")
 
     # 4. Final Summary
     overall_mae = sum(results.values()) / len(results) if results else 0
