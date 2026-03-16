@@ -10,26 +10,19 @@ def evaluate():
     print("🧪 --- STARTING MODEL EVALUATION --- 🧪")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # 1. Load Dataset (Validation Set - TestA)
+    # 1. Load Splits
     kaggle_base = "/kaggle/input/datasets/maamarmohamed/bodym-dataset/bodym"
     if not os.path.exists(kaggle_base):
         print(f"❌ Error: Dataset not found at {kaggle_base}")
         return
 
-    print("Loading validation data (TestA)...")
-    val_dataset = BodyMDataset(kaggle_base, split='testA')
-    val_loader = DataLoader(val_dataset, batch_size=8, shuffle=False, num_workers=2)
-    
-    if len(val_dataset) == 0:
-        print("❌ Error: Validation dataset is empty.")
-        return
+    splits = ['testA', 'testB']
+    results = {}
 
-    # 2. Load Model
+    # 2. Load Model Once
     model = BMNet().to(device)
     model_path = "/kaggle/working/models/bmnet_best.pth"
-    
     if not os.path.exists(model_path):
-        # Fallback to latest if best doesn't exist
         model_path = "/kaggle/working/models/bmnet_latest.pth"
         
     if not os.path.exists(model_path):
@@ -38,7 +31,6 @@ def evaluate():
 
     print(f"Loading weights from {model_path}...")
     checkpoint = torch.load(model_path, map_location=device)
-    # Handle DataParallel state_dict if necessary
     state_dict = checkpoint['model_state_dict']
     from collections import OrderedDict
     new_state_dict = OrderedDict()
@@ -48,29 +40,38 @@ def evaluate():
     model.load_state_dict(new_state_dict)
     model.eval()
 
-    # 3. Evaluation Loop
-    total_mae = 0
-    num_samples = 0
-    
-    print(f"Evaluating on {len(val_dataset)} samples...")
-    
-    with torch.no_grad():
-        for i, (images, measurements) in enumerate(val_loader):
-            images = images.to(device)
-            measurements = measurements.to(device)
+    # 3. Evaluation Loop per Split
+    for split in splits:
+        print(f"\nEvaluating on {split}...")
+        dataset = BodyMDataset(kaggle_base, split=split)
+        if len(dataset) == 0:
+            print(f"⚠️ Warning: Split {split} is empty or not found.")
+            continue
             
-            preds = model(images)
-            
-            # MAE Calculation (centimeters)
-            error = torch.abs(preds - measurements)
-            total_mae += error.sum().item()
-            num_samples += measurements.numel()
-            
-            if i % 20 == 0:
-                current_mae = total_mae / num_samples
-                print(f"      Batch {i}/{len(val_loader)} | Current MAE: {current_mae:.2f} cm")
+        loader = DataLoader(dataset, batch_size=8, shuffle=False, num_workers=2)
+        total_mae = 0
+        num_samples = 0
+        
+        with torch.no_grad():
+            for i, (images, measurements) in enumerate(loader):
+                images = images.to(device)
+                measurements = measurements.to(device)
+                preds = model(images)
+                error = torch.abs(preds - measurements)
+                total_mae += error.sum().item()
+                num_samples += measurements.numel()
+        
+        mae = total_mae / num_samples
+        results[split] = mae
+        print(f"✅ {split} MAE: {mae:.4f} cm")
 
-    final_mae = total_mae / num_samples
+    # 4. Final Summary
+    overall_mae = sum(results.values()) / len(results) if results else 0
+    print("\n" + "="*40)
+    print(f"🏆 OVERALL ACCURACY (MAE): {overall_mae:.4f} cm")
+    for s, m in results.items():
+        print(f"   - {s}: {m:.4f} cm")
+    print("="*40)
     print("\n" + "="*30)
     print(f"🏆 FINAL ACCURACY (MAE): {final_mae:.4f} cm")
     print("="*30)
