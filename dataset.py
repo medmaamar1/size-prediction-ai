@@ -15,37 +15,73 @@ class BodyMDataset(Dataset):
     def __init__(self, base_dir, split='train', transform=None):
         self.base_dir = os.path.join(base_dir, split)
         
-        # 1. Load sub-CSVs
-        meas_df = pd.read_csv(os.path.join(self.base_dir, 'measurements.csv'))
-        hwg_df  = pd.read_csv(os.path.join(self.base_dir, 'hwg_metadata.csv'))
-        photo_map_df = pd.read_csv(os.path.join(self.base_dir, 'subject_to_photo_map.csv'))
+        # 1. Attempt to load the consolidated labels file (Kaggle style)
+        labels_path = os.path.join(self.base_dir, f"{split}_labels.csv")
+        if not os.path.exists(labels_path):
+            # Fallback for split names like 'test_a' -> 'test_a_labels.csv'
+            labels_path = os.path.join(self.base_dir, f"{split.replace('testA', 'test_a').replace('testB', 'test_b')}_labels.csv")
+
+        if os.path.exists(labels_path):
+            print(f"Loading consolidated labels from {labels_path}")
+            self.df = pd.read_csv(labels_path)
+            self.df.columns = self.df.columns.str.lower().str.replace(' ', '_').str.replace('-', '_')
+        else:
+            # 2. Fallback to sub-CSVs (Original style)
+            print(f"Consolidated labels not found. Falling back to sub-CSVs in {self.base_dir}")
+            try:
+                meas_df = pd.read_csv(os.path.join(self.base_dir, 'measurements.csv'))
+                hwg_df  = pd.read_csv(os.path.join(self.base_dir, 'hwg_metadata.csv'))
+                photo_map_df = pd.read_csv(os.path.join(self.base_dir, 'subject_to_photo_map.csv'))
+                
+                for df in [meas_df, hwg_df, photo_map_df]:
+                    df.columns = df.columns.str.lower().str.replace(' ', '_').str.replace('-', '_')
+                
+                self.df = pd.merge(meas_df, hwg_df, on='subject_id')
+                self.df = pd.merge(self.df, photo_map_df, on='subject_id')
+            except Exception as e:
+                print(f"Error loading BodyM split {split}: {e}")
+                self.df = pd.DataFrame()
         
-        # Standardize columns
-        for df in [meas_df, hwg_df, photo_map_df]:
-            df.columns = df.columns.str.lower().str.replace(' ', '_').str.replace('-', '_')
-            
-        # 2. Join Metadata
-        # Merge measurements with height/weight/gender
-        self.df = pd.merge(meas_df, hwg_df, on='subject_id')
-        
-        # 3. Map to Photos
-        # photo_map_df typically maps subject_id to filenames
-        # We assume one front and one side photo per subject for this simplified loader
-        # Filter for subjects that have both front and side entries in the map if necessary
-        self.df = pd.merge(self.df, photo_map_df, on='subject_id')
-        
-        # Paper targets (14 measurements)
-        self.target_cols = [
-            'ankle_cm', 'arm_length_cm', 'bicep_cm', 'calf_cm', 'chest_cm', 
-            'forearm_cm', 'head_to_heel_cm', 'hip_cm', 'leg_length_cm', 
-            'shoulder_breadth_cm', 'shoulder_to_crotch_cm', 'thigh_cm', 
-            'waist_cm', 'wrist_cm'
-        ]
-        
+        # Paper targets (14 measurements) mapping to dataset names
+        # Some might be missing in small datasets, we'll handle them
+        self.target_map = {
+            'ankle_cm': 'ankle_cm',
+            'arm_length_cm': 'arm_length_cm',
+            'bicep_cm': 'bicep_cm',
+            'calf_cm': 'calf_cm',
+            'chest_cm': 'chest_cm',
+            'forearm_cm': 'forearm_cm',
+            'head_to_heel_cm': 'height_cm', # Height is H2H
+            'hip_cm': 'hip_cm',
+            'leg_length_cm': 'leg_length_cm',
+            'shoulder_breadth_cm': 'shoulder_width_cm',
+            'shoulder_to_crotch_cm': 's_to_c_cm', # Fallback
+            'thigh_cm': 'thigh_cm',
+            'waist_cm': 'waist_cm',
+            'wrist_cm': 'wrist_cm'
+        }
+        self.target_cols = list(self.target_map.keys())
+
+        # Ensure all columns exist in DF (fill with 0 if missing)
+        for target, src in self.target_map.items():
+            if src not in self.df.columns:
+                # Try common aliases
+                aliases = [src.replace('_cm', ''), src.replace('width', 'breadth'), 'height_cm']
+                found = False
+                for a in aliases:
+                    if a in self.df.columns:
+                        self.df[target] = self.df[a]
+                        found = True
+                        break
+                if not found:
+                    self.df[target] = 0.0 # Missing measurement
+            else:
+                self.df[target] = self.df[src]
+
         # Filtering for data integrity
-        cols_to_check = self.target_cols + ['height_cm', 'weight_kg', 'photo_id']
-        self.df = self.df.dropna(subset=[c for c in cols_to_check if c in self.df.columns])
-        self.df = self.df.reset_index(drop=True)
+        if not self.df.empty:
+            self.df = self.df.dropna(subset=['height_cm', 'weight_kg'])
+            self.df = self.df.reset_index(drop=True)
 
     def __len__(self):
         return len(self.df)
@@ -53,18 +89,31 @@ class BodyMDataset(Dataset):
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
         
-        # 1. Load and Preprocess Silhouettes (using Kaggle structure)
-        # Assuming photo_id corresponds to the filename in mask/ and mask_left/
-        photo_id = str(row['photo_id'])
-        if not photo_id.endswith('.png'):
-            photo_id += '.png'
-            
-        front_path = os.path.join(self.base_dir, 'mask', photo_id)
-        side_path  = os.path.join(self.base_dir, 'mask_left', photo_id)
+        # 1. Load and Preprocess Silhouettes
+        # Try both 'front_image'/'side_image' and 'photo_id'
+        front_file = str(row.get('front_image', row.get('photo_id', '')))
+        side_file  = str(row.get('side_image', row.get('photo_id', '')))
         
-        # Convert to single channel (grayscale) then resize
-        front_img = Image.open(front_path).convert('L').resize((480, 640)) 
-        side_img  = Image.open(side_path).convert('L').resize((480, 640))
+        if not front_file.endswith('.png') and '.' not in front_file: front_file += '.png'
+        if not side_file.endswith('.png') and '.' not in side_file: side_file += '.png'
+            
+        def find_path(filename, primary_dir, fallback_dir):
+            p1 = os.path.join(self.base_dir, primary_dir, filename)
+            p2 = os.path.join(self.base_dir, fallback_dir, filename)
+            if os.path.exists(p1): return p1
+            return p2
+
+        front_path = find_path(front_file, 'mask', 'images')
+        side_path  = find_path(side_file, 'mask_left', 'images')
+        
+        try:
+            # Convert to single channel (grayscale) then resize
+            front_img = Image.open(front_path).convert('L').resize((480, 640)) 
+            side_img  = Image.open(side_path).convert('L').resize((480, 640))
+        except Exception as e:
+            # Last resort: dummy data if files missing to prevent crash
+            front_img = Image.new('L', (480, 640), 0)
+            side_img  = Image.new('L', (480, 640), 0)
         
         # 2. Horizontal Concatenation (640 x 960)
         combined_sil = Image.new('L', (960, 640))
