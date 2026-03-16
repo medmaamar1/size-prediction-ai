@@ -131,7 +131,14 @@ class SMPLDataGenerator:
             metadata: (B, 2) PyTorch Tensor for height and weight normalized
         """
         batch_size = shape_params.shape[0]
-        output = self.model(betas=shape_params)
+        
+        # Explicitly pass batched zeros for pose to avoid broadcasting errors in smplx
+        # SMPL typically has 24 joints (1 global orient + 23 body joints)
+        # Total parameters = 24 * 3 = 72
+        zero_pose = torch.zeros(batch_size, 69, device=self.device, dtype=shape_params.dtype)
+        zero_orient = torch.zeros(batch_size, 3, device=self.device, dtype=shape_params.dtype)
+        
+        output = self.model(betas=shape_params, body_pose=zero_pose, global_orient=zero_orient)
         vertices = output.vertices # (B, 6890, 3)
         
         measurements = self._calculate_measurements(vertices)
