@@ -21,10 +21,15 @@ def run_comprehensive_test():
         generator = SMPLDataGenerator()
         # Generate a random but deterministic body shape
         betas = torch.zeros(1, 10, device=device) 
-        combined_sil, gt_measurements = generator.generate_sample(shape_params=betas)
+        combined_sil_batch, gt_measurements_batch, metadata_batch = generator.generate_batch(shape_params=betas)
+        
+        # Take the first sample from the batch
+        combined_sil = combined_sil_batch[0, 0].detach().cpu().numpy()
+        # Waist index is 12 in 14-metric list
+        waist_val = gt_measurements_batch[0, 12].item()
         
         print(f"      ✅ Generated Front+Side Silhouette (Shape: {combined_sil.shape})")
-        print(f"      ✅ Extracted Ground Truth (e.g., Waist: {gt_measurements['waist_cm']:.2f}cm)")
+        print(f"      ✅ Extracted Ground Truth (e.g., Waist: {waist_val:.2f}cm)")
         
     except Exception as e:
         print(f"      ❌ STAGE 1 FAILED: {e}")
