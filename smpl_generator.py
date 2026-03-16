@@ -144,8 +144,9 @@ class SMPLDataGenerator:
         """
         batch_size = shape_params.shape[0]
         
-        # Randomize Gender, Weight, and Height Scale (for kids/babies)
-        genders = [np.random.choice(list(self.models.keys())) for _ in range(batch_size)]
+        # Randomize Gender (Male/Female only for distinct silhouettes), Weight, and Height Scale
+        distinct_genders = [g for g in self.models.keys() if g != 'neutral']
+        genders = [np.random.choice(distinct_genders) for _ in range(batch_size)]
         
         # 40kg to 120kg (Normal Adults/Teens)
         # If height scale is low (kids), we further reduce weight proportionally
