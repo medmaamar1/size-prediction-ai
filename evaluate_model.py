@@ -43,11 +43,17 @@ def evaluate():
         
     from collections import OrderedDict
     new_state_dict = OrderedDict()
-    for k, v in state_dict.items():
-        name = k[7:] if k.startswith('module.') else k
-        new_state_dict[name] = v
-    model.load_state_dict(new_state_dict, strict=False)
-    print("      ✅ Weights loaded (using strict=False to bypass MNASNet version bug)")
+    # Bypassing MNASNet version check bug by direct parameter assignment
+    model_state = model.state_dict()
+    matched_keys = 0
+    for name, param in new_state_dict.items():
+        if name in model_state:
+            if model_state[name].shape == param.shape:
+                model_state[name].copy_(param)
+                matched_keys += 1
+    
+    model.load_state_dict(model_state)
+    print(f"      ✅ Weights loaded ({matched_keys} parameters matched).")
     model.eval()
 
     # 3. Evaluation Loop per Split
