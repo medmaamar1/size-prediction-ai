@@ -226,7 +226,7 @@ class SMPLDataGenerator:
         """
         B = vertices.shape[0]
         
-        # Height: max Y - min Y
+        # 1. Height: max Y - min Y
         height = (torch.max(vertices[:, :, 1], dim=1)[0] - torch.min(vertices[:, :, 1], dim=1)[0]) * 100
         
         # Girth helper function
@@ -235,15 +235,86 @@ class SMPLDataGenerator:
             v_loop_shifted = torch.roll(v_loop, shifts=-1, dims=1)
             dist = torch.norm(v_loop - v_loop_shifted, dim=2).sum(dim=1) # (B,)
             return dist * 100
-            
-        # Simplified loops
-        waist = get_girth([3500, 3501, 3502]) 
-        chest = get_girth([3000, 3001, 3002])
+
+        # Length helper function (Euclidean distance between two vertices)
+        def get_length(idx1, idx2):
+            return torch.norm(vertices[:, idx1, :] - vertices[:, idx2, :], dim=1) * 100
+
+        # 2. Chest Girth (around the bust)
+        chest = get_girth([3074, 3073, 3072, 3071, 3070, 3069, 3080, 3108, 3034, 3035])
         
+        # 3. Waist Girth (at the narrowest part)
+        waist = get_girth([3500, 3501, 3502, 3503, 3504, 3505, 3506, 3507, 3508, 3509])
+        
+        # 4. Hip Girth (at the widest part of buttocks)
+        hip = get_girth([3710, 3711, 3712, 3713, 3714, 3715, 3716, 3717, 3718, 3719])
+        
+        # 5. Thigh Girth (Average of L/R)
+        thigh_l = get_girth([1350, 1351, 1352, 1353, 1354, 1355, 1356, 1357, 1358, 1359])
+        thigh_r = get_girth([4770, 4771, 4772, 4773, 4774, 4775, 4776, 4777, 4778, 4779])
+        thigh = (thigh_l + thigh_r) / 2.0
+        
+        # 6. Ankle Girth (Average of L/R)
+        ankle_l = get_girth([3340, 3341, 3342, 3343, 3344])
+        ankle_r = get_girth([6733, 6734, 6735, 6736, 6737])
+        ankle = (ankle_l + ankle_r) / 2.0
+        
+        # 7. Calf Girth (Average of L/R)
+        calf_l = get_girth([1250, 1251, 1252, 1253, 1254, 1255])
+        calf_r = get_girth([4672, 4673, 4674, 4675, 4676, 4677])
+        calf = (calf_l + calf_r) / 2.0
+        
+        # 8. Bicep Girth (Average of L/R)
+        bicep_l = get_girth([1470, 1471, 1472, 1473, 1474])
+        bicep_r = get_girth([4891, 4892, 4893, 4894, 4895])
+        bicep = (bicep_l + bicep_r) / 2.0
+        
+        # 9. Forearm Girth (Average of L/R)
+        forearm_l = get_girth([1540, 1541, 1542, 1543, 1544])
+        forearm_r = get_girth([4960, 4961, 4962, 4963, 4964])
+        forearm = (forearm_l + forearm_r) / 2.0
+        
+        # 10. Wrist Girth (Average of L/R)
+        wrist_l = get_girth([2150, 2151, 2152, 2153, 2154])
+        wrist_r = get_girth([5580, 5581, 5582, 5583, 5584])
+        wrist = (wrist_l + wrist_r) / 2.0
+        
+        # 11. Shoulder Breadth (between shoulder tips)
+        shoulder_breadth = get_length(1086, 4516)
+        
+        # 12. Arm Length (Shoulder to Wrist Average)
+        arm_l = get_length(1086, 2150)
+        arm_r = get_length(4516, 5580)
+        arm_length = (arm_l + arm_r) / 2.0
+        
+        # 13. Leg Length (Hip joint to Ankle Average)
+        leg_l = get_length(1350, 3340)
+        leg_r = get_length(4770, 6733)
+        leg_length = (leg_l + leg_r) / 2.0
+        
+        # 14. Shoulder-to-Crotch (base of neck to crotch)
+        s_to_c = (torch.max(vertices[:, :, 1], dim=1)[0] - vertices[:, 3500, 1]) * 100
+        
+        # Map to self.target_cols (14 metrics)
+        # order: ['ankle_cm', 'arm_length_cm', 'bicep_cm', 'calf_cm', 'chest_cm', 
+        #         'forearm_cm', 'head_to_heel_cm', 'hip_cm', 'leg_length_cm', 
+        #         'shoulder_breadth_cm', 'shoulder_to_crotch_cm', 'thigh_cm', 
+        #         'waist_cm', 'wrist_cm']
         res = torch.zeros(B, 14, device=self.device, dtype=torch.float32)
-        res[:, 6] = height # head_to_heel_cm
-        res[:, 12] = waist # waist_cm
-        res[:, 4] = chest # chest_cm
+        res[:, 0] = ankle
+        res[:, 1] = arm_length
+        res[:, 2] = bicep
+        res[:, 3] = calf
+        res[:, 4] = chest
+        res[:, 5] = forearm
+        res[:, 6] = height
+        res[:, 7] = hip
+        res[:, 8] = leg_length
+        res[:, 9] = shoulder_breadth
+        res[:, 10] = s_to_c
+        res[:, 11] = thigh
+        res[:, 12] = waist
+        res[:, 13] = wrist
         
         return res
 
