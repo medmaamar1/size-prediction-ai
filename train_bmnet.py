@@ -21,6 +21,13 @@ def train_bmnet():
     
     # 2. Models & Optimization
     model = BMNet().to(device)
+    
+    # Enable Multi-GPU support if available (Kaggle 2x T4)
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
+        model = nn.DataParallel(model)
+        batch_size = 16 # Increased from 8 to leverage 2x T4 capacity
+    
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.L1Loss() # MAE Loss as per paper
     
