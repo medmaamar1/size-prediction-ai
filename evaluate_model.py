@@ -30,8 +30,17 @@ def evaluate():
         return
 
     print(f"Loading weights from {model_path}...")
+    import warnings
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    
     checkpoint = torch.load(model_path, map_location=device)
-    state_dict = checkpoint['model_state_dict']
+    
+    # Check if the checkpoint is a dict containing 'model_state_dict' or the state_dict itself
+    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+        state_dict = checkpoint['model_state_dict']
+    else:
+        state_dict = checkpoint
+        
     from collections import OrderedDict
     new_state_dict = OrderedDict()
     for k, v in state_dict.items():
