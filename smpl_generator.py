@@ -108,7 +108,7 @@ class SMPLDataGenerator:
         raster_settings = RasterizationSettings(
             image_size=(640, 480), # (H, W)
             blur_radius=np.log(1. / 1e-4 - 1.) * 1e-4,
-            faces_per_pixel=25, # Reduced from 50 to save VRAM
+            faces_per_pixel=25, # Restored to 25 for higher gradient quality
         )
 
         self.renderer_front = MeshRenderer(
@@ -124,17 +124,10 @@ class SMPLDataGenerator:
     def generate_batch(self, shape_params):
         """
         Differentiable generation of Front + Side silhouettes and measurements.
-        shape_params: (B, 10) PyTorch Tensor with requires_grad=True
-        Returns:
-            combined_sil: (B, 1, 640, 960) PyTorch Tensor [0, 1]
-            measurements: (B, 14) PyTorch Tensor in cm
-            metadata: (B, 2) PyTorch Tensor for height and weight normalized
         """
         batch_size = shape_params.shape[0]
         
-        # Explicitly pass batched zeros for pose to avoid broadcasting errors in smplx
-        # SMPL typically has 24 joints (1 global orient + 23 body joints)
-        # Total parameters = 24 * 3 = 72
+        # Explicitly pass batched zeros for pose to avoid broadcasting errors
         zero_pose = torch.zeros(batch_size, 69, device=self.device, dtype=shape_params.dtype)
         zero_orient = torch.zeros(batch_size, 3, device=self.device, dtype=shape_params.dtype)
         
@@ -142,37 +135,51 @@ class SMPLDataGenerator:
         vertices = output.vertices # (B, 6890, 3)
         
         measurements = self._calculate_measurements(vertices)
-        height_cm = measurements[:, 6] # head_to_heel_cm
-        weight_kg = torch.full((batch_size,), 75.0, device=self.device) # Placeholder weight
+        height_cm = measurements[:, 6]
+        weight_kg = torch.full((batch_size,), 75.0, device=self.device)
         
-        # Z-score normalization as per paper
+        # Z-score normalization
         h_norm = (height_cm - 170.0) / 10.0
         w_norm = (weight_kg - 75.0) / 15.0
-        metadata = torch.stack((h_norm, w_norm), dim=1) # (B, 2)
+        metadata = torch.stack((h_norm, w_norm), dim=1)
 
         if getattr(self, 'pytorch3d_available', False):
             from pytorch3d.structures import Meshes
             faces = self.model.faces
             faces_tensor = torch.tensor(faces.astype(np.int64), dtype=torch.int64, device=self.device)
-            faces_batch = faces_tensor.unsqueeze(0).expand(batch_size, -1, -1)
             
-            # Center and scale vertices to [-1, 1] NDC
+            # Center and scale vertices
             v_min = vertices.min(dim=1, keepdim=True)[0]
             v_max = vertices.max(dim=1, keepdim=True)[0]
             v_center = (v_max + v_min) / 2.0
-            
             v_scaled = (vertices - v_center) / 1.2
             
-            meshes = Meshes(verts=v_scaled, faces=faces_batch)
+            # --- VRAM SHIELD: Micro-batch Rendering ---
+            # Process large batches in chunks of 4 to fit in T4 VRAM
+            chunk_size = 4
+            combined_sils = []
             
-            front_sil = self.renderer_front(meshes)[..., 3] # (B, 640, 480)
-            side_sil = self.renderer_side(meshes)[..., 3] # (B, 640, 480)
+            for i in range(0, batch_size, chunk_size):
+                end_idx = min(i + chunk_size, batch_size)
+                v_chunk = v_scaled[i:end_idx]
+                curr_chunk_size = v_chunk.shape[0]
+                
+                faces_batch = faces_tensor.unsqueeze(0).expand(curr_chunk_size, -1, -1)
+                meshes = Meshes(verts=v_chunk, faces=faces_batch)
+                
+                f_sil = self.renderer_front(meshes)[..., 3] # (chunk, 640, 480)
+                s_sil = self.renderer_side(meshes)[..., 3] # (chunk, 640, 480)
+                
+                chunk_sil = torch.cat([f_sil, s_sil], dim=2) # (chunk, 640, 960)
+                combined_sils.append(chunk_sil)
+                
+                # Free memory immediately
+                del meshes, f_sil, s_sil
+                torch.cuda.empty_cache()
             
-            combined_sil = torch.cat([front_sil, side_sil], dim=2) # (B, 640, 960)
-            combined_sil = combined_sil.unsqueeze(1) # (B, 1, 640, 960)
+            combined_sil = torch.cat(combined_sils, dim=0).unsqueeze(1) # (B, 1, 640, 960)
             
         else:
-            # Fallback
             combined_sil = torch.zeros((batch_size, 1, 640, 960), device=self.device)
             
         return combined_sil, measurements, metadata

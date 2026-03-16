@@ -13,8 +13,9 @@ import numpy as np
 def train_bmnet():
     # 1. Configuration
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    num_epochs = 150 # As per paper
-    batch_size = 8 # Reduced from 22 due to VRAM constraints on Kaggle
+    num_epochs = 150 
+    target_batch_size = 22 # Paper's batch size
+    batch_size = 8 # Physical batch size to fit in VRAM
     learning_rate = 1e-3
     abs_iterations = 5
     abs_eta = 0.1
@@ -22,14 +23,17 @@ def train_bmnet():
     # 2. Models & Optimization
     model = BMNet().to(device)
     
-    # Enable Multi-GPU support if available (Kaggle 2x T4)
     if torch.cuda.device_count() > 1:
         print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
         model = nn.DataParallel(model)
-        batch_size = 16 # Increased from 8 to leverage 2x T4 capacity
+        batch_size = 4 # 4 per GPU (Total 8)
+    
+    # Gradient Accumulation setup to reach paper's batch size of 22
+    accumulation_steps = max(1, target_batch_size // batch_size)
+    print(f"Effective Batch Size: {batch_size * accumulation_steps} (using {accumulation_steps} accumulation steps)")
     
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    criterion = nn.L1Loss() # MAE Loss as per paper
+    criterion = nn.L1Loss()
     
     # 3. Data Loaders (Kaggle Integration)
     kaggle_base = '/kaggle/input/datasets/maamarmohamed/bodym-dataset/bodym'
@@ -75,7 +79,6 @@ def train_bmnet():
             # --- ABS: Adversarial Body Simulator ---
             # Paper: initialize betas around zero, optimize with Adam to maximize loss
             betas = torch.zeros(current_batch_size, 10, dtype=torch.float32, device=device, requires_grad=True)
-            # Add tiny noise for initial symmetry breaking 
             with torch.no_grad():
                 betas.normal_(mean=0, std=0.01)
                 
@@ -89,7 +92,6 @@ def train_bmnet():
                 optimizer_abs.zero_grad()
                 combined_sil, gt_measurements, metadata = smpl_gen.generate_batch(betas)
                 
-                # Format to BMNet 3-channel input (Sil, Height, Weight)
                 h_channel = metadata[:, 0].view(-1, 1, 1, 1).expand(-1, -1, 640, 960)
                 w_channel = metadata[:, 1].view(-1, 1, 1, 1).expand(-1, -1, 640, 960)
                 synth_inputs = torch.cat([combined_sil, h_channel, w_channel], dim=1)
@@ -97,21 +99,16 @@ def train_bmnet():
                 preds = model(synth_inputs)
                 loss_abs = criterion(preds, gt_measurements)
                 
-                # Maximize loss -> backprop(-loss)
                 (-loss_abs).backward(retain_graph=True)
                 optimizer_abs.step()
                 
-                # Clamp betas to [-3, 3] as per paper
                 with torch.no_grad():
                     betas.clamp_(-3.0, 3.0)
             
-            # Unfreeze model parameters
             for param in model.parameters():
                 param.requires_grad = True
                 
-            # --- BMNet Main Training Step ---
-            optimizer.zero_grad()
-            
+            # --- BMNet Main Training Step (with Gradient Accumulation) ---
             # 1. Forward pass on REAL data
             preds_real = model(images)
             loss_real = criterion(preds_real, targets)
@@ -126,19 +123,22 @@ def train_bmnet():
             preds_synth = model(synth_inputs)
             loss_synth = criterion(preds_synth, gt_measurements)
             
-            # 3. Combined Loss & Update
-            total_loss = loss_real + loss_synth
+            # 3. Accumulated Loss
+            total_loss = (loss_real + loss_synth) / accumulation_steps
             total_loss.backward()
-            optimizer.step()
             
-            epoch_loss += total_loss.item()
+            # 4. Optimizer Step (Every 'accumulation_steps' batches)
+            if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1) == len(batches):
+                optimizer.step()
+                optimizer.zero_grad()
             
-            if batch_idx % 10 == 0:
+            epoch_loss += (loss_real + loss_synth).item()
+            
+            if batch_idx % (accumulation_steps * 5) == 0:
                 print(f"Epoch {epoch+1}/{num_epochs} | Batch {batch_idx} | "
                       f"Loss_Real: {loss_real.item():.4f} | Loss_Synth: {loss_synth.item():.4f} | "
-                      f"Total: {total_loss.item():.4f}")
+                      f"Effective Batch Error: {(loss_real + loss_synth).item():.4f}")
             
-            # Frequent cleanup for PyTorch3D VRAM usage
             torch.cuda.empty_cache()
             
             if not train_loader: 
