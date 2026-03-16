@@ -56,6 +56,12 @@ def evaluate():
     print(f"      ✅ Weights loaded ({matched_keys} parameters matched).")
     model.eval()
 
+    metrics_names = [
+        'Ankle', 'Arm-L', 'Bicep', 'Calf', 'Chest', 
+        'Forearm', 'H2H (Height)', 'Hip', 'Leg-L', 
+        'Shoulder-B', 'S-to-C', 'Thigh', 'Waist', 'Wrist'
+    ]
+
     # 3. Evaluation Loop per Split
     for split in splits:
         print(f"\nEvaluating on {split}...")
@@ -65,21 +71,42 @@ def evaluate():
             continue
             
         loader = DataLoader(dataset, batch_size=8, shuffle=False, num_workers=2)
-        total_mae = 0
-        num_samples = 0
+        
+        split_total_mae = 0
+        split_num_samples = 0
+        per_metric_mae = np.zeros(14)
+        per_metric_counts = np.zeros(14)
         
         with torch.no_grad():
             for i, (images, measurements) in enumerate(loader):
                 images = images.to(device)
                 measurements = measurements.to(device)
                 preds = model(images)
-                error = torch.abs(preds - measurements)
-                total_mae += error.sum().item()
-                num_samples += measurements.numel()
+                
+                # Mask out zero targets (missing data) to avoid skewing error
+                mask = (measurements > 0).float()
+                error = torch.abs(preds - measurements) * mask
+                
+                # Update totals
+                split_total_mae += error.sum().item()
+                split_num_samples += mask.sum().item()
+                
+                # Update per-metric
+                per_metric_mae += error.sum(dim=0).cpu().numpy()
+                per_metric_counts += mask.sum(dim=0).cpu().numpy()
         
-        mae = total_mae / num_samples
-        results[split] = mae
-        print(f"✅ {split} MAE: {mae:.4f} cm")
+        avg_mae = split_total_mae / max(1, split_num_samples)
+        results[split] = avg_mae
+        print(f"✅ {split} MAE: {avg_mae:.4f} cm (filtered missing data)")
+        
+        # Print per-metric breakdown for this split
+        print(f"\nDetail for {split}:")
+        for idx, name in enumerate(metrics_names):
+            if per_metric_counts[idx] > 0:
+                m_mae = per_metric_mae[idx] / per_metric_counts[idx]
+                print(f"      - {name.ljust(12)}: {m_mae:.2f} cm")
+            else:
+                print(f"      - {name.ljust(12)}: N/A (No data)")
 
     # 4. Final Summary
     overall_mae = sum(results.values()) / len(results) if results else 0
