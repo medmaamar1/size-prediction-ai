@@ -25,11 +25,16 @@ def run_comprehensive_test():
         
         # Take the first sample from the batch
         combined_sil = combined_sil_batch[0, 0].detach().cpu().numpy()
-        # Waist index is 12 in 14-metric list
-        waist_val = gt_measurements_batch[0, 12].item()
-        
         print(f"      ✅ Generated Front+Side Silhouette (Shape: {combined_sil.shape})")
-        print(f"      ✅ Extracted Ground Truth (e.g., Waist: {waist_val:.2f}cm)")
+        print(f"      ✅ Extracted Ground Truth (14 metrics):")
+        metrics_names = [
+            'Ankle', 'Arm-L', 'Bicep', 'Calf', 'Chest', 
+            'Forearm', 'H2H', 'Hip', 'Leg-L', 
+            'Shoulder-B', 'S-to-C', 'Thigh', 'Waist', 'Wrist'
+        ]
+        for i, name in enumerate(metrics_names):
+            val = gt_measurements_batch[0, i].item()
+            print(f"         - {name}: {val:.2f}cm")
         
     except Exception as e:
         print(f"      ❌ STAGE 1 FAILED: {e}")
@@ -84,7 +89,7 @@ def run_comprehensive_test():
     ]
     
     print("\n--- SAMPLE OUTPUT DATA ---")
-    for i, name in enumerate(metrics[:5]): # Corrected slicing for list
+    for i, name in enumerate(metrics):
         print(f"      - {name}: {predictions[0, i]:.2f} units")
     
     print("\n🏁 --- ALL STAGES PASSED --- 🏁")
