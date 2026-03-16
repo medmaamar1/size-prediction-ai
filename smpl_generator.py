@@ -16,7 +16,6 @@ class SMPLDataGenerator:
         
         # Standard SMPL model names expected by smplx library
         MODEL_NAMES = {
-            'neutral': 'SMPL_NEUTRAL.pkl',
             'female':  'SMPL_FEMALE.pkl',
             'male':    'SMPL_MALE.pkl'
         }
@@ -36,13 +35,12 @@ class SMPLDataGenerator:
                 
                 # 2. Map the "basicmodel" files to standard SMPL names
                 mappings = {
-                    'neutral': "basicmodel_neutral_lbs_10_207_0_v1.1.0.pkl",
                     'female':  "basicmodel_f_lbs_10_207_0_v1.1.0.pkl",
                     'male':    "basicmodel_m_lbs_10_207_0_v1.1.0.pkl"
                 }
                 
-                src = os.path.join(KAGGLE_SRC, mappings.get(gender, mappings['neutral']))
-                dst = os.path.join(KAGGLE_SMPL_DIR, MODEL_NAMES.get(gender, MODEL_NAMES['neutral']))
+                src = os.path.join(KAGGLE_SRC, mappings.get(gender, list(mappings.values())[0]))
+                dst = os.path.join(KAGGLE_SMPL_DIR, MODEL_NAMES.get(gender, list(MODEL_NAMES.values())[0]))
                 
                 if os.path.exists(src) and not os.path.exists(dst):
                     try:
@@ -64,7 +62,7 @@ class SMPLDataGenerator:
 
         # 3. Create models for all genders
         self.models = {}
-        for g in ['neutral', 'female', 'male']:
+        for g in ['female', 'male']:
             try:
                 # Ensure the symlinks exist for all genders
                 dst = os.path.join(KAGGLE_SMPL_DIR, MODEL_NAMES[g])
@@ -144,9 +142,8 @@ class SMPLDataGenerator:
         """
         batch_size = shape_params.shape[0]
         
-        # Randomize Gender (Male/Female only for distinct silhouettes), Weight, and Height Scale
-        distinct_genders = [g for g in self.models.keys() if g != 'neutral']
-        genders = [np.random.choice(distinct_genders) for _ in range(batch_size)]
+        # Randomize Gender (Strictly Male/Female), Weight, and Height Scale
+        genders = [np.random.choice(['female', 'male']) for _ in range(batch_size)]
         
         # 40kg to 120kg (Normal Adults/Teens)
         # If height scale is low (kids), we further reduce weight proportionally
