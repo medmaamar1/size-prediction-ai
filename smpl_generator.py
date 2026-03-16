@@ -62,13 +62,28 @@ class SMPLDataGenerator:
             else:
                 model_dir = model_path
 
-        # 3. Create model using the directory path
-        # smplx.create expects a directory and searches for SMPL_GENDER.pkl inside
-        try:
-            self.model = smplx.create(model_dir, model_type='smpl', gender=gender, ext='pkl').to(self.device).eval()
-        except Exception as e:
-            print(f"Error loading SMPL model from {model_dir}: {e}")
-            raise e
+        # 3. Create models for all genders
+        self.models = {}
+        for g in ['neutral', 'female', 'male']:
+            try:
+                # Ensure the symlinks exist for all genders
+                dst = os.path.join(KAGGLE_SMPL_DIR, MODEL_NAMES[g])
+                src = os.path.join(KAGGLE_SRC, mappings[g])
+                if os.path.exists(src) and not os.path.exists(dst):
+                    try: os.symlink(src, dst)
+                    except: 
+                        import shutil
+                        shutil.copy(src, dst)
+                
+                self.models[g] = smplx.create(model_dir, model_type='smpl', gender=g, ext='pkl').to(self.device).eval()
+            except Exception as e:
+                print(f"Warning: Could not load {g} model: {e}")
+        
+        if not self.models:
+            raise RuntimeError("Could not load any SMPL models.")
+
+        # Faces are same for all SMPL gendered models
+        self.faces = self.models[list(self.models.keys())[0]].faces
         
         # Ground Truth Measurements (14 as per paper)
         self.target_cols = [
@@ -124,38 +139,59 @@ class SMPLDataGenerator:
     def generate_batch(self, shape_params):
         """
         Differentiable generation of Front + Side silhouettes and measurements.
+        Randomizes gender and weight to prevent overfitting.
+        Supports children by scaling the mesh (height randomization).
         """
         batch_size = shape_params.shape[0]
         
-        # Explicitly pass batched zeros for pose to avoid broadcasting errors
+        # Randomize Gender, Weight, and Height Scale (for kids/babies)
+        genders = [np.random.choice(list(self.models.keys())) for _ in range(batch_size)]
+        
+        # 40kg to 120kg (Normal Adults/Teens)
+        # If height scale is low (kids), we further reduce weight proportionally
+        # Children/Infants Scale: 0.5 (baby) to 1.1 (tall adult)
+        h_scales = torch.rand(batch_size, device=self.device) * 0.6 + 0.5 
+        weights_kg = torch.rand(batch_size, device=self.device) * 80 + 40 # 40-120
+        # Reduce weight for kids if h_scale < 0.8
+        for i in range(batch_size):
+            if h_scales[i] < 0.8:
+                # Baby weight roughly 5kg-20kg
+                weights_kg[i] = weights_kg[i] * (h_scales[i]**2) # Simplified heuristic
+        
+        # Explicitly pass batched zeros for pose
         zero_pose = torch.zeros(batch_size, 69, device=self.device, dtype=shape_params.dtype)
         zero_orient = torch.zeros(batch_size, 3, device=self.device, dtype=shape_params.dtype)
         
-        output = self.model(betas=shape_params, body_pose=zero_pose, global_orient=zero_orient)
-        vertices = output.vertices # (B, 6890, 3)
+        # Generate vertices (handling multi-gender)
+        all_vertices = []
+        for i in range(batch_size):
+            # Process one-by-one to handle gender or chunk them
+            model = self.models[genders[i]]
+            out = model(betas=shape_params[i:i+1], body_pose=zero_pose[i:i+1], global_orient=zero_orient[i:i+1])
+            v = out.vertices[0] * h_scales[i] # Apply height scale factor
+            all_vertices.append(v)
+        
+        vertices = torch.stack(all_vertices) # (B, 6890, 3)
         
         measurements = self._calculate_measurements(vertices)
         height_cm = measurements[:, 6]
-        weight_kg = torch.full((batch_size,), 75.0, device=self.device)
         
-        # Z-score normalization
+        # Z-score normalization for metadata
         h_norm = (height_cm - 170.0) / 10.0
-        w_norm = (weight_kg - 75.0) / 15.0
+        w_norm = (weights_kg - 75.0) / 15.0
         metadata = torch.stack((h_norm, w_norm), dim=1)
 
         if getattr(self, 'pytorch3d_available', False):
             from pytorch3d.structures import Meshes
-            faces = self.model.faces
-            faces_tensor = torch.tensor(faces.astype(np.int64), dtype=torch.int64, device=self.device)
+            faces_tensor = torch.tensor(self.faces.astype(np.int64), dtype=torch.int64, device=self.device)
             
-            # Center and scale vertices
+            # Center and scale vertices for renderer
             v_min = vertices.min(dim=1, keepdim=True)[0]
             v_max = vertices.max(dim=1, keepdim=True)[0]
             v_center = (v_max + v_min) / 2.0
             v_scaled = (vertices - v_center) / 1.2
             
-            # --- VRAM SHIELD: Micro-batch Rendering ---
-            # Process large batches in chunks of 4 to fit in T4 VRAM
+            # Micro-batch Rendering
             chunk_size = 4
             combined_sils = []
             
@@ -167,17 +203,16 @@ class SMPLDataGenerator:
                 faces_batch = faces_tensor.unsqueeze(0).expand(curr_chunk_size, -1, -1)
                 meshes = Meshes(verts=v_chunk, faces=faces_batch)
                 
-                f_sil = self.renderer_front(meshes)[..., 3] # (chunk, 640, 480)
-                s_sil = self.renderer_side(meshes)[..., 3] # (chunk, 640, 480)
+                f_sil = self.renderer_front(meshes)[..., 3]
+                s_sil = self.renderer_side(meshes)[..., 3]
                 
-                chunk_sil = torch.cat([f_sil, s_sil], dim=2) # (chunk, 640, 960)
+                chunk_sil = torch.cat([f_sil, s_sil], dim=2)
                 combined_sils.append(chunk_sil)
                 
-                # Free memory immediately
                 del meshes, f_sil, s_sil
                 torch.cuda.empty_cache()
             
-            combined_sil = torch.cat(combined_sils, dim=0).unsqueeze(1) # (B, 1, 640, 960)
+            combined_sil = torch.cat(combined_sils, dim=0).unsqueeze(1)
             
         else:
             combined_sil = torch.zeros((batch_size, 1, 640, 960), device=self.device)
