@@ -72,13 +72,11 @@ def evaluate():
     for s, m in results.items():
         print(f"   - {s}: {m:.4f} cm")
     print("="*40)
-    print("\n" + "="*30)
-    print(f"🏆 FINAL ACCURACY (MAE): {final_mae:.4f} cm")
-    print("="*30)
+    
     print("\nInterpretation:")
-    if final_mae < 3.0:
+    if overall_mae < 3.0:
         print("🟢 EXCELLENT: SOTA performance matching the paper.")
-    elif final_mae < 5.0:
+    elif overall_mae < 5.0:
         print("🟡 GOOD: Very usable for fashion/size recommendation.")
     else:
         print("🔴 NEEDS WORK: Model needs more training time.")
