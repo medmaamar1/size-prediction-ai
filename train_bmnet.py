@@ -1,4 +1,8 @@
 import compat_patch
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*autocast.*")
+
 import os
 import torch
 import torch.nn as nn
