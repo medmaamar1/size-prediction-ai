@@ -108,7 +108,7 @@ class SMPLDataGenerator:
         raster_settings = RasterizationSettings(
             image_size=(640, 480), # (H, W)
             blur_radius=np.log(1. / 1e-4 - 1.) * 1e-4,
-            faces_per_pixel=50,
+            faces_per_pixel=25, # Reduced from 50 to save VRAM
         )
 
         self.renderer_front = MeshRenderer(

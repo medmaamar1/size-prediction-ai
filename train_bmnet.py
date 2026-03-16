@@ -14,7 +14,7 @@ def train_bmnet():
     # 1. Configuration
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     num_epochs = 150 # As per paper
-    batch_size = 22 # As per paper
+    batch_size = 8 # Reduced from 22 due to VRAM constraints on Kaggle
     learning_rate = 1e-3
     abs_iterations = 5
     abs_eta = 0.1
@@ -130,6 +130,9 @@ def train_bmnet():
                 print(f"Epoch {epoch+1}/{num_epochs} | Batch {batch_idx} | "
                       f"Loss_Real: {loss_real.item():.4f} | Loss_Synth: {loss_synth.item():.4f} | "
                       f"Total: {total_loss.item():.4f}")
+            
+            # Frequent cleanup for PyTorch3D VRAM usage
+            torch.cuda.empty_cache()
             
             if not train_loader: 
                 break # Just one simulated batch locally
