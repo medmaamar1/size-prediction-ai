@@ -141,13 +141,13 @@ class SMPLDataGenerator:
         Supports children by scaling the mesh (height randomization).
         """
         batch_size = shape_params.shape[0]
+        
         # Randomize Gender (Strictly Male/Female), Weight, and Height Scale
         genders = [np.random.choice(['female', 'male']) for _ in range(batch_size)]
         
         # 40kg to 120kg (Normal Adults/Teens)
-        # If height scale is low (kids), we further reduce weight proportionally
-        # Children/Infants Scale: 0.5 (baby) to 1.1 (tall adult)
-        h_scales = torch.rand(batch_size, device=self.device) * 0.6 + 0.5 
+        # Height Scale: 0.5 (child) to 1.15 (tall adult)
+        h_scales = torch.rand(batch_size, device=self.device) * 0.65 + 0.5 
         weights_kg = torch.rand(batch_size, device=self.device) * 80 + 40 # 40-120
         # Reduce weight for kids if h_scale < 0.8
         for i in range(batch_size):
