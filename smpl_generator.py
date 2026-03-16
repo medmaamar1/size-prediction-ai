@@ -146,9 +146,8 @@ class SMPLDataGenerator:
         genders = [np.random.choice(['female', 'male']) for _ in range(batch_size)]
         
         # 40kg to 120kg (Normal Adults/Teens)
-        # If height scale is low (kids), we further reduce weight proportionally
-        # Children/Infants Scale: 0.5 (baby) to 1.1 (tall adult)
-        h_scales = torch.rand(batch_size, device=self.device) * 0.6 + 0.5 
+        # We increase the maximum scale to 1.25 (~212cm) to ensure taller adults are generated frequently
+        h_scales = torch.rand(batch_size, device=self.device) * 0.8 + 0.45 
         weights_kg = torch.rand(batch_size, device=self.device) * 80 + 40 # 40-120
         # Reduce weight for kids if h_scale < 0.8
         for i in range(batch_size):
