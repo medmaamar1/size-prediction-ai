@@ -57,13 +57,29 @@ def train_bmnet():
     # Initialize SMPL Generator for ABS
     smpl_gen = SMPLDataGenerator()
     
-    print(f"Starting training on {device}...")
-    
-    best_val_loss = float('inf')
+    # 4. Checkpoint & Resume Logic
     output_dir = "/kaggle/working/models"
     os.makedirs(output_dir, exist_ok=True)
+    checkpoint_path = os.path.join(output_dir, "bmnet_checkpoint.pth")
+    best_val_loss = float('inf')
+    start_epoch = 0
+    patience = 3
+    patience_counter = 0
+
+    if os.path.exists(checkpoint_path):
+        print(f"--- Resuming training from checkpoint: {checkpoint_path} ---")
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_epoch = checkpoint['epoch'] + 1
+        best_val_loss = checkpoint['best_val_loss']
+        print(f"--- Resumed from Epoch {start_epoch} with Best Loss {best_val_loss:.4f} ---")
+    else:
+        print("--- Starting fresh training (no checkpoint found) ---")
+
+    print(f"Starting training on {device}...")
     
-    for epoch in range(num_epochs):
+    for epoch in range(start_epoch, num_epochs):
         model.train()
         epoch_loss = 0.0
         
@@ -81,14 +97,12 @@ def train_bmnet():
             current_batch_size = images.shape[0]
             
             # --- ABS: Adversarial Body Simulator ---
-            # Paper: initialize betas around zero, optimize with Adam to maximize loss
             betas = torch.zeros(current_batch_size, 10, dtype=torch.float32, device=device, requires_grad=True)
             with torch.no_grad():
                 betas.normal_(mean=0, std=0.01)
                 
             optimizer_abs = optim.Adam([betas], lr=abs_eta)
             
-            # Freeze model context during ABS gradient ascent
             for param in model.parameters():
                 param.requires_grad = False
                 
@@ -102,7 +116,6 @@ def train_bmnet():
                 
                 preds = model(synth_inputs)
                 loss_abs = criterion(preds, gt_measurements)
-                
                 (-loss_abs).backward(retain_graph=True)
                 optimizer_abs.step()
                 
@@ -112,12 +125,10 @@ def train_bmnet():
             for param in model.parameters():
                 param.requires_grad = True
                 
-            # --- BMNet Main Training Step (with Gradient Accumulation) ---
-            # 1. Forward pass on REAL data
+            # --- Main Training Step ---
             preds_real = model(images)
             loss_real = criterion(preds_real, targets)
             
-            # 2. Forward pass on ADVERSARIAL SYNTHETIC data
             with torch.no_grad():
                 combined_sil, gt_measurements, metadata = smpl_gen.generate_batch(betas.detach())
                 h_channel = metadata[:, 0].view(-1, 1, 1, 1).expand(-1, -1, 640, 960)
@@ -127,11 +138,9 @@ def train_bmnet():
             preds_synth = model(synth_inputs)
             loss_synth = criterion(preds_synth, gt_measurements)
             
-            # 3. Accumulated Loss
             total_loss = (loss_real + loss_synth) / accumulation_steps
             total_loss.backward()
             
-            # 4. Optimizer Step (Every 'accumulation_steps' batches)
             if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1) == len(batches):
                 optimizer.step()
                 optimizer.zero_grad()
@@ -140,24 +149,36 @@ def train_bmnet():
             
             if batch_idx % (accumulation_steps * 5) == 0:
                 print(f"Epoch {epoch+1}/{num_epochs} | Batch {batch_idx} | "
-                      f"Loss_Real: {loss_real.item():.4f} | Loss_Synth: {loss_synth.item():.4f} | "
-                      f"Effective Batch Error: {(loss_real + loss_synth).item():.4f}")
+                      f"Loss_Real: {loss_real.item():.4f} | Loss_Synth: {loss_synth.item():.4f}")
             
             torch.cuda.empty_cache()
-            
-            if not train_loader: 
-                break # Just one simulated batch locally
+            if not train_loader: break
                 
-        # --- Validation & Saving ---
-        print(f"Epoch [{epoch+1}/{num_epochs}] Train Loss: {epoch_loss / max(1, len(batches)):.4f}")
+        # --- Validation & Early Stopping ---
+        avg_epoch_loss = epoch_loss / max(1, len(batches))
+        print(f"Epoch [{epoch+1}/{num_epochs}] Train Loss: {avg_epoch_loss:.4f}")
         
-        # Save model checkpoints
-        torch.save(model.state_dict(), os.path.join(output_dir, "bmnet_latest.pth"))
+        # Save Resumable Checkpoint
+        checkpoint_state = {
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'best_val_loss': best_val_loss,
+        }
+        torch.save(checkpoint_state, checkpoint_path)
         
-        if epoch_loss < best_val_loss:
-            best_val_loss = epoch_loss
+        # Best model saving + Early Stopping logic
+        if avg_epoch_loss < best_val_loss:
+            best_val_loss = avg_epoch_loss
+            patience_counter = 0
             torch.save(model.state_dict(), os.path.join(output_dir, "bmnet_best.pth"))
-            print(f"Saved new best model with loss: {best_val_loss:.4f}")
+            print(f"✅ New Best Model! Loss: {best_val_loss:.4f} | Checkpoint saved.")
+        else:
+            patience_counter += 1
+            print(f"⚠️ No improvement. Patience: {patience_counter}/{patience}")
+            if patience_counter >= patience:
+                print(f"🛑 EARLY STOPPING triggered at Epoch {epoch+1}.")
+                break
 
 if __name__ == "__main__":
     train_bmnet()
