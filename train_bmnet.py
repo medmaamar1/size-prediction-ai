@@ -258,8 +258,7 @@ def train_bmnet():
     # ── Paper-exact config ────────────────────────────────────────────────
     # Phase 1 — paper §5: "150k iterations, batch 22, Adam lr=1e-3,
     #            LR reduced at 75% and 88% of training"
-    phase1_iterations = 30_000   # practical Kaggle default (2x T4, 12h session)
-                                  # paper's full number is 150,000 — resume across sessions to reach it
+    phase1_iterations = 150_000  # paper §5: "train BMnet for 150k iterations"
 
     # Phase 2 — paper §3.2: "fine-tune for 10 epochs using synthetic examples,
     #            synthetic bodies are not repeated over epochs"
