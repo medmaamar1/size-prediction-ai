@@ -45,7 +45,7 @@ def evaluate():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # 1. Load Splits
-    kaggle_base = "/kaggle/input/datasets/maamarmohamed/bodym-dataset/bodym"
+    kaggle_base = "/kaggle/input/datasets/maamarmohamed12/bodym-dataset/bodym"
     if not os.path.exists(kaggle_base):
         # Local fallback context
         kaggle_base = "bodym" 
@@ -55,8 +55,8 @@ def evaluate():
 
     splits = ['testA', 'testB']
     model_paths = [
-        "/kaggle/input/models/maamarmohamed/get-size/other/default/1/bmnet_best.pth",
-        "/kaggle/input/models/maamarmohamed/get-size/other/default/1/bmnet_checkpoint.pth"
+        "/kaggle/input/models/maamarmohamed12/get-size/other/default/1/bmnet_best.pth",
+        "/kaggle/input/models/maamarmohamed12/get-size/other/default/1/bmnet_checkpoint.pth"
     ]
     
     all_model_results = {}
