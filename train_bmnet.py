@@ -34,14 +34,28 @@ def start_heartbeat(interval_seconds=1800):
 # been fitted to real human bodies in the BodyM training set"
 # ─────────────────────────────────────────────────────────────────────────────
 def build_real_beta_pool(train_subset, smpl_gen, device):
-    print("--- Building real-body β pool (SMPL fitting) ---")
-    fitted = []
-    crit   = nn.L1Loss()
-    n      = len(train_subset)
+    """
+    Fit SMPL beta to every subject. Also extracts heights & weights
+    from the dataset metadata channels so we can train h regressor.
+    Returns: (N,10) betas, (N,) heights_cm, (N,) weights_kg
+    """
+    print("--- Building real-body beta pool (SMPL fitting) ---")
+    fitted  = []
+    heights = []
+    weights = []
+    crit    = nn.L1Loss()
+    n       = len(train_subset)
 
     for idx in range(n):
-        _, gt_meas = train_subset[idx]
-        gt_meas    = gt_meas.unsqueeze(0).to(device)
+        img, gt_meas = train_subset[idx]
+        gt_meas = gt_meas.unsqueeze(0).to(device)
+
+        # Recover height/weight from z-scored metadata channels
+        # channel 1 = (height - 170) / 10,  channel 2 = (weight - 75) / 15
+        h_cm = img[1, 0, 0].item() * 10.0 + 170.0
+        w_kg = img[2, 0, 0].item() * 15.0 + 75.0
+        heights.append(h_cm)
+        weights.append(w_kg)
 
         beta = torch.zeros(1, 10, device=device, requires_grad=True)
         opt  = optim.Adam([beta], lr=0.05)
@@ -59,14 +73,45 @@ def build_real_beta_pool(train_subset, smpl_gen, device):
         if (idx + 1) % 100 == 0:
             print(f"  Fitted {idx+1}/{n} subjects")
 
-    pool = torch.cat(fitted, dim=0)   # (N, 10)
-    print(f"--- β pool ready: {pool.shape} ---")
+    pool      = torch.cat(fitted, dim=0)
+    heights_t = torch.tensor(heights, dtype=torch.float32)
+    weights_t = torch.tensor(weights, dtype=torch.float32)
+    print(f"--- beta pool ready: {pool.shape} ---")
+    return pool, heights_t, weights_t
+
+
+def build_pose_pool(n_subjects):
+    """
+    Build pose pool by adding small perturbations to A-pose.
+    Paper: "sample theta randomly from poses of real humans in BodyM"
+    Since BodyM subjects are in A-pose, we create diversity via perturbations.
+    Returns (N*10, 72) tensor.
+    """
+    print("--- Building pose pool ---")
+    poses = []
+    for _ in range(n_subjects * 10):
+        pose = torch.zeros(72)
+        pose[:3]  = torch.randn(3) * 0.05   # small global orient
+        pose[3:]  = torch.randn(69) * 0.1   # small joint perturbations
+        poses.append(pose)
+    pool = torch.stack(poses)
+    print(f"--- Pose pool ready: {pool.shape} ---")
     return pool
 
 
 def sample_betas_from_pool(pool, batch_size, device):
-    idx = torch.randint(0, pool.shape[0], (batch_size,))
-    return pool[idx].clone().to(device)
+    """
+    Sample betas from pool and add uniform noise within hypercube side=0.5.
+    Paper §5.2: "Random sampling is performed uniformly within a hypercube
+                 with side length of 0.5 around the real shape parameters"
+    So each β_i is perturbed by Uniform(-0.25, +0.25).
+    """
+    idx   = torch.randint(0, pool.shape[0], (batch_size,))
+    betas = pool[idx].clone().to(device)
+    # Add uniform noise in [-0.25, 0.25] (hypercube side length = 0.5)
+    noise = (torch.rand_like(betas) - 0.5) * 0.5
+    betas = (betas + noise).clamp(-3.0, 3.0)
+    return betas
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -292,16 +337,45 @@ def train_bmnet():
     start_iter, best_val_loss = load_checkpoint(model, optimizer,
                                                 checkpoint_path, device)
 
-    # ── Build fitted-β pool from the 90% training subjects ───────────────
+    # ── Build fitted-β pool + pose pool + train h regressor ─────────────
     beta_pool      = None
     beta_pool_path = os.path.join(output_dir, "beta_pool.pt")
+    pose_pool_path = os.path.join(output_dir, "pose_pool.pt")
+    h_path         = os.path.join(output_dir, "h_regressor.pth")
+
     if not dummy_fallback:
+        # β pool
         if os.path.exists(beta_pool_path):
             beta_pool = torch.load(beta_pool_path, map_location='cpu')
-            print(f"--- Loaded cached β pool: {beta_pool.shape} ---")
+            print(f"--- Loaded cached beta pool: {beta_pool.shape} ---")
         else:
-            beta_pool = build_real_beta_pool(train_subset, smpl_gen, device)
+            beta_pool, heights_t, weights_t = build_real_beta_pool(
+                train_subset, smpl_gen, device
+            )
             torch.save(beta_pool, beta_pool_path)
+            torch.save({'heights': heights_t, 'weights': weights_t},
+                       os.path.join(output_dir, "hw_labels.pt"))
+
+        # h regressor: beta -> (height, weight) — differentiable for ABS
+        # Paper: "height and weight depend on beta via h()"
+        if os.path.exists(h_path):
+            smpl_gen.load_h(h_path)
+        else:
+            hw = torch.load(os.path.join(output_dir, "hw_labels.pt"))
+            smpl_gen.train_h(beta_pool.to(device),
+                             hw['heights'].to(device),
+                             hw['weights'].to(device))
+
+        # pose pool — sample randomly during ABS
+        # Paper: "sample theta randomly from poses of real humans in BodyM"
+        if os.path.exists(pose_pool_path):
+            pose_pool = torch.load(pose_pool_path, map_location='cpu')
+            print(f"--- Loaded cached pose pool: {pose_pool.shape} ---")
+        else:
+            pose_pool = build_pose_pool(n_train)
+            torch.save(pose_pool, pose_pool_path)
+
+        smpl_gen.load_pose_pool(pose_pool)
 
     # ═════════════════════════════════════════════════════════════════════
     # PHASE 1 — Pre-train on real BodyM data for 150k iterations
