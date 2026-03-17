@@ -217,16 +217,20 @@ def load_checkpoint(model, optimizer, checkpoint_path, device):
                   if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint
                   else checkpoint)
 
+    # Strip module. prefix from checkpoint keys
     clean = {(k[7:] if k.startswith('module.') else k): v
              for k, v in state_dict.items()}
 
-    model_state = model.state_dict()
+    # Unwrap DataParallel so keys always match (clean keys have no module. prefix)
+    base_model  = model.module if hasattr(model, 'module') else model
+    model_state = base_model.state_dict()
+
     matched = 0
     for name, param in clean.items():
         if name in model_state and model_state[name].shape == param.shape:
             model_state[name].copy_(param)
             matched += 1
-    model.load_state_dict(model_state)
+    base_model.load_state_dict(model_state)
     print(f"--- Loaded {matched}/{len(model_state)} parameters ---")
 
     start_iter    = 0
