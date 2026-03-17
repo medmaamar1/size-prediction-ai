@@ -56,7 +56,7 @@ def evaluate():
             print(f" Error: Dataset not found at {kaggle_base} or fallback.")
             return
 
-    splits = ['train', 'testA', 'testB']
+    splits = ['train']
     model_paths = [
         "/kaggle/input/models/maamarmohamed12/get-size/other/default/1/bmnet_best.pth",
         "/kaggle/input/models/maamarmohamed12/get-size/other/default/1/bmnet_checkpoint.pth"
