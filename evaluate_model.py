@@ -93,8 +93,10 @@ def evaluate():
                 # Limit train split evaluation to 1000 samples for speed if it's the main dataset
                 if split == 'train' and len(dataset) > 1000:
                     print(f"   Note: Subsampling 1000 samples from train for comparison.")
-                    indices = torch.randperm(len(dataset))[:1000]
-                    dataset = torch.utils.data.Subset(dataset, indices)
+                    # Workaround for Subset indexing bug with DataLoaders in older PyTorch versions
+                    # We create a new dataset with just a chunk to avoid TypeErrors with '.iloc'
+                    indices = torch.randperm(len(dataset))[:1000].tolist()
+                    dataset.df = dataset.df.iloc[indices].reset_index(drop=True)
 
                 if len(dataset) == 0:
                     print(f"⚠️ Warning: Split {split} is empty or not found.")
