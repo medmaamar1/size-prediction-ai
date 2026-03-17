@@ -10,13 +10,11 @@ def test_feature_alignment():
     
     # 1. Configuration
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # Using a dummy path for local check, but this script will run in environment where dataset exists
     kaggle_base = "/kaggle/input/datasets/maamarmohamed12/bodym-dataset/bodym"
-    split = "testA" 
+    split = "train" # CHANGED TO TRAIN 
     
     if not os.path.exists(kaggle_base):
-        print(f"⚠️ Warning: Dataset not found at {kaggle_base}. Skipping actual data load.")
-        print("Note: This test is designed to run in the Kaggle environment.")
+        print(f"⚠️ Warning: Dataset not found at {kaggle_base}.")
         return
 
     # 2. Dataset Verification
@@ -29,6 +27,25 @@ def test_feature_alignment():
 
     print(f"✅ Dataset loaded with {len(dataset)} samples.")
     
+    # --- ADDED DIAGNOSTIC: Check Silhouette Mean for one sample ---
+    print("\n📸 Silhouette Diagnostic:")
+    img, target = dataset[0]
+    sil_mean = img[0].mean().item()
+    print(f"   - Input Shape: {img.shape}")
+    print(f"   - Combined Silh Mean: {sil_mean:.4f}")
+    if sil_mean < 0.20:
+        print("   ⚠️ WARNING: Silh mean is low (< 0.20). One profile might be missing (BLACK).")
+    else:
+        print("   ✅ Silh mean looks healthy (> 0.20).")
+
+    # --- ADDED DIAGNOSTIC: Check Target values ---
+    print("\n🎯 Target Alignment Diagnostic (First Sample):")
+    for idx, name in enumerate(dataset.target_cols):
+        val = target[idx].item()
+        print(f"   {idx:02d}: {name.ljust(20)} = {val:.2f} cm")
+        if val == 0:
+            print(f"      ❌ ERROR: {name} is 0.0! Column fallback failed.")
+
     # 3. Check Feature Mapping (target_cols)
     expected_features = [
         'ankle_cm', 'arm_length_cm', 'bicep_cm', 'calf_cm', 'chest_cm', 
