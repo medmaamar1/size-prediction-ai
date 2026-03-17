@@ -21,7 +21,11 @@ def evaluate():
 
     # 2. Load Model Once
     model = BMNet().to(device)
-    model_path = "/kaggle/input/models/maamarmohamed12/smpl-generator/other/default/1/bmnet_best.pth"
+    model_path = "/kaggle/input/models/maamarmohamed12/ai-model/pytorch/default/1/bmnet_best.pth"
+    if not os.path.exists(model_path):
+        # Fallback to checkpoint if best is not found
+        model_path = "/kaggle/input/models/maamarmohamed12/ai-model/pytorch/default/1/bmnet_checkpoint.pth"
+    
     if not os.path.exists(model_path):
         print(f"❌ Error: No model checkpoint found at {model_path}")
         return
