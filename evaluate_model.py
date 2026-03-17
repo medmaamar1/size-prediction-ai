@@ -9,7 +9,7 @@ import numpy as np
 def load_bm_model(model_path, device):
     model = BMNet().to(device)
     if not os.path.exists(model_path):
-        print(f"❌ Error: No model checkpoint found at {model_path}")
+        print(f" Error: No model checkpoint found at {model_path}")
         return None
 
     print(f"Loading weights from {model_path}...")
@@ -36,12 +36,12 @@ def load_bm_model(model_path, device):
                 matched_keys += 1
     
     model.load_state_dict(model_state)
-    print(f"      ✅ Weights loaded ({matched_keys} parameters matched).")
+    print(f"       Weights loaded ({matched_keys} parameters matched).")
     model.eval()
     return model
 
 def evaluate():
-    print("🧪 --- STARTING MODEL EVALUATION --- 🧪")
+    print(" --- STARTING MODEL EVALUATION --- ")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # 1. Load Splits
@@ -51,7 +51,7 @@ def evaluate():
         # Local fallback context
         kaggle_base = "bodym" 
         if not os.path.exists(kaggle_base):
-            print(f"❌ Error: Dataset not found at {kaggle_base} or fallback.")
+            print(f" Error: Dataset not found at {kaggle_base} or fallback.")
             return
 
     splits = ['testA', 'testB']
@@ -71,29 +71,29 @@ def evaluate():
     for model_path in model_paths:
         model_name = os.path.basename(model_path)
         print(f"\n" + "="*50)
-        print(f"🏆 EVALUATING MODEL: {model_name}")
-        print(f"📂 Path: {model_path}")
+        print(f" EVALUATING MODEL: {model_name}")
+        print(f" Path: {model_path}")
         print("="*50)
         
         try:
             model = load_bm_model(model_path, device)
             if model is None:
-                print(f"⚠️ Model load returned None for {model_path}")
+                print(f" Model load returned None for {model_path}")
                 continue
         except Exception as e:
-            print(f"❌ CRITICAL ERROR loading {model_name}: {str(e)}")
+            print(f" CRITICAL ERROR loading {model_name}: {str(e)}")
             continue
             
         results = {}
 
         # 3. Evaluation Loop per Split
         for split in splits:
-            print(f"\n🔍 Evaluating {model_name} on {split}...")
+            print(f"\n Evaluating {model_name} on {split}...")
             try:
                 dataset = BodyMDataset(kaggle_base, split=split)
                 print(f"   Found {len(dataset)} samples in {split}")
                 if len(dataset) == 0:
-                    print(f"⚠️ Warning: Split {split} is empty or not found.")
+                    print(f" Warning: Split {split} is empty or not found.")
                     continue
                     
                 loader = DataLoader(dataset, batch_size=8, shuffle=False, num_workers=2)
@@ -122,42 +122,20 @@ def evaluate():
                 if split_num_samples > 0:
                     avg_mae = split_total_mae / split_num_samples
                     results[split] = avg_mae
-                    print(f"✅ {split} MAE: {avg_mae:.4f} cm")
+                    print(f" {split} MAE: {avg_mae:.4f} cm")
                 else:
-                    print(f"⚠️ No valid samples (mask sum is 0) in {split}")
+                    print(f" No valid samples (mask sum is 0) in {split}")
             except Exception as e:
-                print(f"❌ Error during split {split} evaluation: {str(e)}")
+                print(f" Error during split {split} evaluation: {str(e)}")
                 import traceback
                 traceback.print_exc()
             
         all_model_results[model_name] = results
 
     # 4. Final Comparison Summary
-    print("\n" + "📊" * 20)
+    print("\n" + "" * 20)
     print("       FINAL COMPARISON SUMMARY")
-    print("📊" * 20)
-                    preds = model(images)
-                    
-                    # Mask out zero targets (missing data)
-                    mask = (measurements > 0).float()
-                    error = torch.abs(preds - measurements) * mask
-                    
-                    split_total_mae += error.sum().item()
-                    split_num_samples += mask.sum().item()
-                    
-                    per_metric_mae += error.sum(dim=0).cpu().numpy()
-                    per_metric_counts += mask.sum(dim=0).cpu().numpy()
-            
-            avg_mae = split_total_mae / max(1, split_num_samples)
-            results[split] = avg_mae
-            print(f"✅ {split} MAE: {avg_mae:.4f} cm")
-            
-        all_model_results[model_name] = results
-
-    # 4. Final Comparison Summary
-    print("\n" + "📊" * 20)
-    print("       FINAL COMPARISON SUMMARY")
-    print("📊" * 20)
+    print("" * 20)
     
     for model_name, results in all_model_results.items():
         if results:
@@ -170,3 +148,6 @@ def evaluate():
             print(f"\nModel: {model_name} - No results available.")
     
     print("\n" + "="*40)
+
+if __name__ == "__main__":
+    evaluate()
