@@ -60,20 +60,39 @@ def train_bmnet():
     # 4. Checkpoint & Resume Logic
     output_dir = "/kaggle/working/models"
     os.makedirs(output_dir, exist_ok=True)
-    checkpoint_path = os.path.join(output_dir, "bmnet_checkpoint.pth")
+    
+    # User-provided starting checkpoint
+    kaggle_checkpoint = "/kaggle/input/models/maamarmohamed12/get-size/other/default/1/bmnet_best.pth"
+    # Local resumable checkpoint
+    local_checkpoint = os.path.join(output_dir, "bmnet_checkpoint.pth")
+    
+    # Determine which checkpoint to use (prefer local for resuming current run)
+    checkpoint_path = local_checkpoint if os.path.exists(local_checkpoint) else kaggle_checkpoint
+    
     best_val_loss = float('inf')
     start_epoch = 0
     patience = 3
     patience_counter = 0
 
     if os.path.exists(checkpoint_path):
-        print(f"--- Resuming training from checkpoint: {checkpoint_path} ---")
+        print(f"--- Loading starting weights from: {checkpoint_path} ---")
         checkpoint = torch.load(checkpoint_path, map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        start_epoch = checkpoint['epoch'] + 1
-        best_val_loss = checkpoint['best_val_loss']
-        print(f"--- Resumed from Epoch {start_epoch} with Best Loss {best_val_loss:.4f} ---")
+        
+        # Strip 'module.' prefix if present
+        state_dict = checkpoint['model_state_dict']
+        new_state_dict = { (k[7:] if k.startswith('module.') else k): v for k, v in state_dict.items() }
+        
+        model.load_state_dict(new_state_dict)
+        
+        # Only load optimizer and epoch if it's the exact same run stage
+        if 'optimizer_state_dict' in checkpoint:
+            try:
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                start_epoch = checkpoint.get('epoch', 0) + 1
+                best_val_loss = checkpoint.get('best_val_loss', float('inf'))
+                print(f"--- Resumed from Epoch {start_epoch} with Best Loss {best_val_loss:.4f} ---")
+            except:
+                print("--- Optimizer state mismatch, starting with fresh optimizer ---")
     else:
         print("--- Starting fresh training (no checkpoint found) ---")
 
