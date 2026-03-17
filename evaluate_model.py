@@ -45,15 +45,15 @@ def evaluate():
     print(f"      ✅ Weights loaded ({matched_keys_count}/{len(model_state)} parameters matched).")
     model.eval()
 
-    # 2. Setup Test-A Dataset
+    # 2. Setup Test-B Dataset
     kaggle_base = "/kaggle/input/datasets/maamarmohamed12/bodym-dataset/bodym"
-    split = 'testA'
+    split = 'testB'
     
     if not os.path.exists(kaggle_base):
         print(f"❌ Error: Dataset not found at {kaggle_base}")
         return
 
-    print(f"\n🔍 Evaluating on {split} folder...")
+    print(f"\n🔍 Evaluating on {split} folder (In-the-wild)...")
     dataset = BodyMDataset(kaggle_base, split=split)
     if len(dataset) == 0:
         print(f"⚠️ Warning: Split {split} is empty or not found.")
@@ -90,7 +90,7 @@ def evaluate():
                 print(f"   Processed batch {i+1}...")
 
     avg_mae = total_mae / max(1, total_samples)
-    print(f"\n✅ Final Results (Test-A MAE): {avg_mae:.4f} cm")
+    print(f"\n✅ Final Results (Test-B MAE): {avg_mae:.4f} cm")
     print("-" * 30)
     
     # We need counts per metric too for accurate per-metric MAE
