@@ -78,14 +78,28 @@ def train_bmnet():
         print(f"--- Loading starting weights from: {checkpoint_path} ---")
         checkpoint = torch.load(checkpoint_path, map_location=device)
         
-        # Strip 'module.' prefix if present
-        state_dict = checkpoint['model_state_dict']
+        # Robust dictionary extraction: bmnet_best.pth might be raw state_dict
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            state_dict = checkpoint['model_state_dict']
+        else:
+            state_dict = checkpoint
+            
+        # Strip 'module.' prefix if present (from DataParallel)
         new_state_dict = { (k[7:] if k.startswith('module.') else k): v for k, v in state_dict.items() }
         
-        model.load_state_dict(new_state_dict)
+        # Load parameters that match in shape (handles slight architecture revisions)
+        model_state = model.state_dict()
+        matched_keys = 0
+        for name, param in new_state_dict.items():
+            if name in model_state and model_state[name].shape == param.shape:
+                model_state[name].copy_(param)
+                matched_keys += 1
         
-        # Only load optimizer and epoch if it's the exact same run stage
-        if 'optimizer_state_dict' in checkpoint:
+        model.load_state_dict(model_state)
+        print(f"--- Loaded {matched_keys} model parameters. ---")
+        
+        # Only load optimizer and epoch if it's the exact same run stage (usually from local_checkpoint)
+        if isinstance(checkpoint, dict) and 'optimizer_state_dict' in checkpoint:
             try:
                 optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
                 start_epoch = checkpoint.get('epoch', 0) + 1
