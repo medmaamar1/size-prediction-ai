@@ -19,8 +19,8 @@ def load_bm_model(model_path, device):
     checkpoint = torch.load(model_path, map_location=device)
     
     # Check if the checkpoint is a dict containing 'model_state_dict' or the state_dict itself
-    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-        state_dict = checkpoint['model_state_dict']
+    if isinstance(checkpoint, dict) and ('model_state_dict' in checkpoint or 'state_dict' in checkpoint):
+        state_dict = checkpoint.get('model_state_dict', checkpoint.get('state_dict'))
     else:
         state_dict = checkpoint
         
@@ -34,6 +34,8 @@ def load_bm_model(model_path, device):
             if model_state[name].shape == param.shape:
                 model_state[name].copy_(param)
                 matched_keys += 1
+            else:
+                print(f" Shape mismatch for {name}: {model_state[name].shape} vs {param.shape}")
     
     model.load_state_dict(model_state)
     print(f"       Weights loaded ({matched_keys} parameters matched).")
@@ -62,12 +64,6 @@ def evaluate():
     
     all_model_results = {}
 
-    metrics_names = [
-        'Ankle', 'Arm-L', 'Bicep', 'Calf', 'Chest', 
-        'Forearm', 'H2H (Height)', 'Hip', 'Leg-L', 
-        'Shoulder-B', 'S-to-C', 'Thigh', 'Waist', 'Wrist'
-    ]
-
     for model_path in model_paths:
         model_name = os.path.basename(model_path)
         print(f"\n" + "="*50)
@@ -76,6 +72,7 @@ def evaluate():
         print("="*50)
         
         try:
+            # We must re-instantiate the model to clear state between evaluations
             model = load_bm_model(model_path, device)
             if model is None:
                 print(f" Model load returned None for {model_path}")
@@ -90,8 +87,8 @@ def evaluate():
         for split in splits:
             print(f"\n Evaluating {model_name} on {split}...")
             try:
+                # Reload dataset per model evaluation to be safe
                 dataset = BodyMDataset(kaggle_base, split=split)
-                print(f"   Found {len(dataset)} samples in {split}")
                 if len(dataset) == 0:
                     print(f" Warning: Split {split} is empty or not found.")
                     continue
@@ -100,8 +97,6 @@ def evaluate():
                 
                 split_total_mae = 0
                 split_num_samples = 0
-                per_metric_mae = np.zeros(14)
-                per_metric_counts = np.zeros(14)
                 
                 with torch.no_grad():
                     for i, (images, measurements) in enumerate(loader):
@@ -115,20 +110,15 @@ def evaluate():
                         
                         split_total_mae += error.sum().item()
                         split_num_samples += mask.sum().item()
-                        
-                        per_metric_mae += error.sum(dim=0).cpu().numpy()
-                        per_metric_counts += mask.sum(dim=0).cpu().numpy()
                 
                 if split_num_samples > 0:
                     avg_mae = split_total_mae / split_num_samples
                     results[split] = avg_mae
                     print(f" {split} MAE: {avg_mae:.4f} cm")
                 else:
-                    print(f" No valid samples (mask sum is 0) in {split}")
+                    print(f" No valid samples in {split}")
             except Exception as e:
                 print(f" Error during split {split} evaluation: {str(e)}")
-                import traceback
-                traceback.print_exc()
             
         all_model_results[model_name] = results
 
@@ -144,8 +134,6 @@ def evaluate():
             print(f"Overall MAE: {overall_mae:.4f} cm")
             for s, m in results.items():
                 print(f"   - {s}: {m:.4f} cm")
-        else:
-            print(f"\nModel: {model_name} - No results available.")
     
     print("\n" + "="*40)
 
