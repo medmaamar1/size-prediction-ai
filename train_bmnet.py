@@ -433,8 +433,10 @@ def train_bmnet():
                 print(f"  ── Val Loss @ iter {iteration:,}: {val_loss:.4f}")
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
-                    torch.save(model.state_dict(),
-                               os.path.join(output_dir, "bmnet_phase1_best.pth"))
+                    # Save without DataParallel module. prefix
+                    state = (model.module.state_dict()
+                             if hasattr(model, 'module') else model.state_dict())
+                    torch.save(state, os.path.join(output_dir, "bmnet_phase1_best.pth"))
                     print(f"  ✅ New best val loss: {best_val_loss:.4f}")
                 model.train()
 
@@ -494,7 +496,9 @@ def train_bmnet():
             'best_val_loss':        best_val_loss,
         }, local_checkpoint)
 
-    torch.save(model.state_dict(), os.path.join(output_dir, "bmnet_phase2.pth"))
+    state = (model.module.state_dict()
+             if hasattr(model, 'module') else model.state_dict())
+    torch.save(state, os.path.join(output_dir, "bmnet_phase2.pth"))
     print("--- Phase 2 complete ---")
 
     # ═════════════════════════════════════════════════════════════════════
@@ -546,8 +550,9 @@ def train_bmnet():
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(),
-                       os.path.join(output_dir, "bmnet_best.pth"))
+            state = (model.module.state_dict()
+                     if hasattr(model, 'module') else model.state_dict())
+            torch.save(state, os.path.join(output_dir, "bmnet_best.pth"))
             print(f"  ✅ New best (Phase 3) val loss: {best_val_loss:.4f}")
 
     print("\n🏁 Training complete.")
