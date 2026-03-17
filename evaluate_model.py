@@ -32,25 +32,36 @@ def evaluate():
     
     checkpoint = torch.load(model_path, map_location=device)
     
-    # Check if the checkpoint is a dict containing 'model_state_dict' or the state_dict itself
+    # 1. Extract the state dict (from Resumable Checkpoint or Raw state_dict)
     if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
         state_dict = checkpoint['model_state_dict']
     else:
         state_dict = checkpoint
         
-    new_state_dict = { (k[7:] if k.startswith('module.') else k): v for k, v in state_dict.items() }
-    
-    # Bypassing MNASNet version check bug by direct parameter assignment
+    # 2. Correctly strip 'module.' prefix (from DataParallel training)
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        name = k[7:] if k.startswith('module.') else k
+        new_state_dict[name] = v
+        
+    # 3. Robust Loading with Error Tracking
     model_state = model.state_dict()
-    matched_keys = 0
-    for name, param in new_state_dict.items():
-        if name in model_state:
-            if model_state[name].shape == param.shape:
-                model_state[name].copy_(param)
-                matched_keys += 1
+    missing_keys, unexpected_keys = model.load_state_dict(new_state_dict, strict=False)
     
-    model.load_state_dict(model_state)
-    print(f"      ✅ Weights loaded ({matched_keys} parameters matched).")
+    if missing_keys:
+        print("⚠️ Warning: Missing keys in checkpoint (May cause random results):")
+        for key in missing_keys:
+            print(f"   - {key}")
+            
+    if unexpected_keys:
+        print("⚠️ Warning: Unexpected keys in checkpoint (Ignored):")
+        # Don't print all to avoid cluttering, but log the count
+        print(f"   - {len(unexpected_keys)} keys were not used.")
+
+    # Calculate match count for debugging
+    matched_keys = [k for k in model_state.keys() if k in new_state_dict]
+    print(f"      ✅ Weights loaded ({len(matched_keys)}/{len(model_state)} parameters matched).")
+    
     model.eval()
 
     metrics_names = [
