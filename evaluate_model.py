@@ -76,35 +76,15 @@ def evaluate():
     for name, mae in zip(metrics_names, per_metric_mae/num_samples):
         print(f"{name:12}: {mae:.4f} cm")
 
-if __name__ == "__main__":
-    evaluate()
-                per_metric_counts += mask.sum(dim=0).cpu().numpy()
-        
-        avg_mae = split_total_mae / max(1, split_num_samples)
-        results[split] = avg_mae
-        print(f"\n✅ {split} MAE: {avg_mae:.4f} cm")
-        
-        print(f"Metric Breakdown (MAE in cm):")
-        for idx, name in enumerate(metrics_names):
-            if per_metric_counts[idx] > 0:
-                m_mae = per_metric_mae[idx] / per_metric_counts[idx]
-                print(f"   {name.ljust(12)}: {m_mae:.2f}")
-
-    # 4. Final Summary
-    overall_mae = sum(results.values()) / len(results) if results else 0
-    print("\n" + "="*40)
-    print(f"🏆 OVERALL ACCURACY (MAE): {overall_mae:.4f} cm")
-    for s, m in results.items():
-        print(f"   - {s}: {m:.4f} cm")
-    print("="*40)
-    
     print("\nInterpretation:")
-    if overall_mae < 3.0:
+    avg_mae = total_mae / num_samples
+    if avg_mae < 3.0:
         print("🟢 EXCELLENT: SOTA performance matching the paper.")
-    elif overall_mae < 5.0:
+    elif avg_mae < 5.0:
         print("🟡 GOOD: Very usable for fashion/size recommendation.")
     else:
         print("🔴 NEEDS WORK: Model needs more training time.")
 
 if __name__ == "__main__":
     evaluate()
+
