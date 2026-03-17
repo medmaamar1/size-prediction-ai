@@ -54,24 +54,24 @@ class BodyMDataset(Dataset):
             'head_to_heel_cm': 'height_cm', # Height is H2H
             'hip_cm': 'hip_cm',
             'leg_length_cm': 'leg_length_cm',
-            'shoulder_breadth_cm': 'shoulder_width_cm',
-            'shoulder_to_crotch_cm': 's_to_c_cm', # Fallback
+            'shoulder_breadth_cm': 'shoulder_breadth_cm',
+            'shoulder_to_crotch_cm': 'shoulder_to_crotch_cm', 
             'thigh_cm': 'thigh_cm',
             'waist_cm': 'waist_cm',
             'wrist_cm': 'wrist_cm'
         }
         
-        # FIX: The dataset was incorrectly mapping head_to_heel, shoulder_breadth, and shoulder_to_crotch
-        # to 'height_cm' in many CSVs, causing massive MAE. 
-        # We need to ensure that IF height_cm is the only thing found, we don't overwrite valid indices
-        # or we use more specific column matches.
+        # FIX: The dataset was incorrectly mapping shoulder_breadth and shoulder_to_crotch
+        # to 'height_cm' in many CSVs when the columns were slightly named differently.
         self.target_cols = list(self.target_map.keys())
 
         # Ensure all columns exist in DF (fill with 0 if missing)
         for target, src in self.target_map.items():
             if src not in self.df.columns:
                 # Try common aliases but EXCLUDE 'height_cm' for breadths/lengths
-                aliases = [src.replace('_cm', ''), src.replace('width', 'breadth')]
+                aliases = [src.replace('_cm', ''), src.replace('breadth', 'width'), src.replace('width', 'breadth')]
+                if target == 'shoulder_to_crotch_cm':
+                    aliases.append('s_to_c_cm')
                 if target == 'head_to_heel_cm':
                     aliases.append('height_cm')
                 
