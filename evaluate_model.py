@@ -107,15 +107,31 @@ def evaluate():
                 split_total_mae = 0
                 split_num_samples = 0
                 
+                # Tracking per-target MAE
+                target_names = dataset.target_cols
+                per_target_mae = torch.zeros(len(target_names)).to(device)
+                per_target_counts = torch.zeros(len(target_names)).to(device)
+                
                 with torch.no_grad():
                     for i, (images, measurements) in enumerate(loader):
                         images = images.to(device)
                         measurements = measurements.to(device)
                         preds = model(images)
                         
+                        # Debug first batch predictions vs targets
+                        if i == 0:
+                            print(f"\n--- DEBUG SAMPLE (First Batch, First Item) ---")
+                            for idx, name in enumerate(target_names):
+                                p, t = preds[0, idx].item(), measurements[0, idx].item()
+                                print(f" {name:20}: Pred {p:6.2f} | GT {t:6.2f} | Diff {abs(p-t):6.2f}")
+                            print("-" * 47 + "\n")
+
                         # Mask out zero targets (missing data)
                         mask = (measurements > 0).float()
                         error = torch.abs(preds - measurements) * mask
+                        
+                        per_target_mae += error.sum(dim=0)
+                        per_target_counts += mask.sum(dim=0)
                         
                         split_total_mae += error.sum().item()
                         split_num_samples += mask.sum().item()
@@ -123,7 +139,14 @@ def evaluate():
                 if split_num_samples > 0:
                     avg_mae = split_total_mae / split_num_samples
                     results[split] = avg_mae
-                    print(f" {split} MAE: {avg_mae:.4f} cm")
+                    print(f" {split} OVERALL MAE: {avg_mae:.4f} cm")
+                    
+                    print("\n--- PER-TARGET MAE BREAKDOWN ---")
+                    for idx, name in enumerate(target_names):
+                        if per_target_counts[idx] > 0:
+                            t_mae = (per_target_mae[idx] / per_target_counts[idx]).item()
+                            print(f" {name:25}: {t_mae:6.2f} cm")
+                    print("-" * 35)
                 else:
                     print(f" No valid samples in {split}")
             except Exception as e:
