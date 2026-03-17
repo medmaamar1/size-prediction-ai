@@ -56,7 +56,7 @@ def evaluate():
             print(f" Error: Dataset not found at {kaggle_base} or fallback.")
             return
 
-    splits = ['testA', 'testB']
+    splits = ['train', 'testA', 'testB']
     model_paths = [
         "/kaggle/input/models/maamarmohamed12/get-size/other/default/1/bmnet_best.pth",
         "/kaggle/input/models/maamarmohamed12/get-size/other/default/1/bmnet_checkpoint.pth"
@@ -67,30 +67,37 @@ def evaluate():
     for model_path in model_paths:
         model_name = os.path.basename(model_path)
         print(f"\n" + "="*50)
-        print(f" EVALUATING MODEL: {model_name}")
-        print(f" Path: {model_path}")
+        print(f"🏆 EVALUATING MODEL: {model_name}")
+        print(f"📂 Path: {model_path}")
         print("="*50)
         
         try:
             # We must re-instantiate the model to clear state between evaluations
             model = load_bm_model(model_path, device)
             if model is None:
-                print(f" Model load returned None for {model_path}")
+                print(f"⚠️ Model load returned None for {model_path}")
                 continue
         except Exception as e:
-            print(f" CRITICAL ERROR loading {model_name}: {str(e)}")
+            print(f"❌ CRITICAL ERROR loading {model_name}: {str(e)}")
             continue
             
         results = {}
 
         # 3. Evaluation Loop per Split
         for split in splits:
-            print(f"\n Evaluating {model_name} on {split}...")
+            print(f"\n🔍 Evaluating {model_name} on {split}...")
             try:
                 # Reload dataset per model evaluation to be safe
                 dataset = BodyMDataset(kaggle_base, split=split)
+                
+                # Limit train split evaluation to 1000 samples for speed if it's the main dataset
+                if split == 'train' and len(dataset) > 1000:
+                    print(f"   Note: Subsampling 1000 samples from train for comparison.")
+                    indices = torch.randperm(len(dataset))[:1000]
+                    dataset = torch.utils.data.Subset(dataset, indices)
+
                 if len(dataset) == 0:
-                    print(f" Warning: Split {split} is empty or not found.")
+                    print(f"⚠️ Warning: Split {split} is empty or not found.")
                     continue
                     
                 loader = DataLoader(dataset, batch_size=8, shuffle=False, num_workers=2)
