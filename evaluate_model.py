@@ -16,7 +16,7 @@ def evaluate():
         print(f"❌ Error: Dataset not found at {kaggle_base}")
         return
 
-    splits = ['testA', 'testB']
+    splits = ['train']
     results = {}
 
     # 2. Load Model Once
