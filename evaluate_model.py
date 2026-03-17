@@ -12,8 +12,8 @@ def evaluate():
     
     # 1. Load Model
     model = BMNet().to(device)
-    # Target the specific phase1_best model requested
-    model_path = "/kaggle/working/models/bmnet_phase1_best.pth"
+    # Target the specific user-provided model file
+    model_path = "/kaggle/input/models/maamarmohamed12/first-version-2-3/pytorch/default/1/bmnet_best (1).pth"
     
     if not os.path.exists(model_path):
         print(f"❌ Error: No model checkpoint found at {model_path}")
@@ -45,15 +45,15 @@ def evaluate():
     print(f"      ✅ Weights loaded ({matched_keys_count}/{len(model_state)} parameters matched).")
     model.eval()
 
-    # 2. Setup Test-B Dataset
+    # 2. Setup Test-A Dataset
     kaggle_base = "/kaggle/input/datasets/maamarmohamed12/bodym-dataset/bodym"
-    split = 'testB'
+    split = 'testA'
     
     if not os.path.exists(kaggle_base):
         print(f"❌ Error: Dataset not found at {kaggle_base}")
         return
 
-    print(f"\n🔍 Evaluating on {split} folder (In-the-wild)...")
+    print(f"\n🔍 Evaluating on {split} folder...")
     dataset = BodyMDataset(kaggle_base, split=split)
     if len(dataset) == 0:
         print(f"⚠️ Warning: Split {split} is empty or not found.")
@@ -90,7 +90,7 @@ def evaluate():
                 print(f"   Processed batch {i+1}...")
 
     avg_mae = total_mae / max(1, total_samples)
-    print(f"\n✅ Final Results (Test-B MAE): {avg_mae:.4f} cm")
+    print(f"\n✅ Final Results (Test-A MAE): {avg_mae:.4f} cm")
     print("-" * 30)
     
     # We need counts per metric too for accurate per-metric MAE
