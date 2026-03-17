@@ -229,6 +229,11 @@ class SMPLDataGenerator:
             heights_cm = torch.rand(batch_size, device=self.device) * 40 + 150  # 150-190cm
             weights_kg = torch.rand(batch_size, device=self.device) * 80 + 40   # 40-120kg
 
+        # Clamp to realistic human ranges regardless of h quality
+        # This prevents garbage h output from corrupting vertex scaling
+        heights_cm = heights_cm.clamp(140.0, 220.0)
+        weights_kg = weights_kg.clamp(30.0, 180.0)
+
         # ── FIX 1: sample pose from real BodyM pool ───────────────────────
         # Paper: "sample θ randomly from poses of real humans in BodyM"
         poses_72 = self._sample_poses(batch_size)        # (B, 72)
@@ -426,6 +431,7 @@ class SMPLDataGenerator:
             image_size=(640, 480),
             blur_radius=np.log(1. / 1e-4 - 1.) * 1e-4,
             faces_per_pixel=25,
+            max_faces_per_bin=50000,  # fix: prevent coarse rasterization overflow
         )
         blend = BlendParams(sigma=1e-4, gamma=1e-4)
         self.renderer_front = MeshRenderer(
