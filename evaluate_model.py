@@ -7,23 +7,16 @@ from dataset import BodyMDataset
 import numpy as np
 
 def evaluate():
-    print("🧪 --- STARTING MODEL EVALUATION --- 🧪")
+    print("🧪 --- STARTING SYNTHETIC MODEL EVALUATION (SMPL-X) --- 🧪")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # 1. Load Splits
-    kaggle_base = "/kaggle/input/datasets/maamarmohamed12/bodym-dataset/bodym"
-    if not os.path.exists(kaggle_base):
-        print(f"❌ Error: Dataset not found at {kaggle_base}")
-        return
-
-    splits = ['train']
-    results = {}
-
-    # 2. Load Model Once
+    from smpl_generator import SMPLDataGenerator
+    generator = SMPLDataGenerator()
+    
+    # 1. Load Model
     model = BMNet().to(device)
     model_path = "/kaggle/input/models/maamarmohamed12/ai-model/pytorch/default/1/bmnet_best.pth"
     if not os.path.exists(model_path):
-        # Fallback to checkpoint if best is not found
         model_path = "/kaggle/input/models/maamarmohamed12/ai-model/pytorch/default/1/bmnet_checkpoint.pth"
     
     if not os.path.exists(model_path):
@@ -31,93 +24,60 @@ def evaluate():
         return
 
     print(f"Loading weights from {model_path}...")
-    import warnings
-    warnings.filterwarnings("ignore", category=FutureWarning)
-    
     checkpoint = torch.load(model_path, map_location=device)
     
-    # 1. Extract the state dict (from Resumable Checkpoint or Raw state_dict)
     if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
         state_dict = checkpoint['model_state_dict']
     else:
         state_dict = checkpoint
         
-    # 2. Correctly strip 'module.' prefix (from DataParallel training)
     new_state_dict = {}
     for k, v in state_dict.items():
         name = k[7:] if k.startswith('module.') else k
         new_state_dict[name] = v
         
-    # 3. Robust Loading with Error Tracking
-    model_state = model.state_dict()
-    
-    # FIX: MNASNet version check bug bypass
-    # Some torch versions expect a '_metadata' key with version info or they crash
-    input_state_dict = {}
-    matched_keys_count = 0
-    for name, param in new_state_dict.items():
-        if name in model_state:
-            if model_state[name].shape == param.shape:
-                # Direct copying into current model state to bypass version checks
-                model_state[name].copy_(param)
-                matched_keys_count += 1
-
-    # Load the updated state_dict back into the model
-    model.load_state_dict(model_state)
-    print(f"      ✅ Weights loaded ({matched_keys_count}/{len(model_state)} parameters matched via bypass).")
-    
+    model.load_state_dict(new_state_dict, strict=False)
     model.eval()
 
     metrics_names = [
         'Ankle', 'Arm-L', 'Bicep', 'Calf', 'Chest', 
-        'Forearm', 'H2H (Height)', 'Hip', 'Leg-L', 
+        'Forearm', 'H2H', 'Hip', 'Leg-L', 
         'Shoulder-B', 'S-to-C', 'Thigh', 'Waist', 'Wrist'
     ]
 
-    # 3. Evaluation Loop per Split
-    for split in splits:
-        print(f"\n" + "-"*20)
-        print(f"🔍 Evaluating on {split}...")
-        dataset = BodyMDataset(kaggle_base, split=split)
-        if len(dataset) == 0:
-            print(f"⚠️ Warning: Split {split} is empty or not found.")
-            continue
-            
-        print(f"Dataset columns found: {list(dataset.df.columns)[:10]}...")
-        loader = DataLoader(dataset, batch_size=8, shuffle=False, num_workers=2)
-        
-        split_total_mae = 0
-        split_num_samples = 0
-        per_metric_mae = np.zeros(14)
-        per_metric_counts = np.zeros(14)
-        
-        # Diagnostic: Check first sample
-        test_img, test_target = dataset[0]
-        print(f"First Sample Info:")
-        print(f"   - Input Shape: {test_img.shape}")
-        print(f"   - Silh Mean: {test_img[0].mean():.4f} (Should be > 0 if images loaded)")
-        print(f"   - Height Channel Val: {test_img[1, 0, 0]:.4f}")
-        print(f"   - Weight Channel Val: {test_img[2, 0, 0]:.4f}")
+    print(f"\n🔍 Evaluating on 100 Synthetic SMPL Bodies...")
+    
+    total_mae = 0
+    per_metric_mae = np.zeros(14)
+    num_samples = 100
 
-        with torch.no_grad():
-            for i, (images, measurements) in enumerate(loader):
-                images = images.to(device)
-                measurements = measurements.to(device)
-                preds = model(images)
-                
-                if i == 0:
-                    print(f"First Batch Raw Comparisons:")
-                    print(f"   - Sample 0 Preds:   {preds[0][:5].cpu().numpy()}")
-                    print(f"   - Sample 0 Targets: {measurements[0][:5].cpu().numpy()}")
-                
-                # Mask out zero targets (missing data)
-                mask = (measurements > 0).float()
-                error = torch.abs(preds - measurements) * mask
-                
-                split_total_mae += error.sum().item()
-                split_num_samples += mask.sum().item()
-                
-                per_metric_mae += error.sum(dim=0).cpu().numpy()
+    with torch.no_grad():
+        for i in range(num_samples):
+            # Generate random shape
+            betas = torch.randn(1, 10, device=device) * 1.5 # Moderate diversity
+            combined_sil, gt_measurements, metadata = generator.generate_batch(betas)
+            
+            # Prepare internal model input
+            h_channel = metadata[:, 0].view(-1, 1, 1, 1).expand(-1, -1, 640, 960)
+            w_channel = metadata[:, 1].view(-1, 1, 1, 1).expand(-1, -1, 640, 960)
+            inputs = torch.cat([combined_sil / 255.0, h_channel, w_channel], dim=1)
+            
+            preds = model(inputs)
+            error = torch.abs(preds - gt_measurements)
+            
+            total_mae += error.mean().item()
+            per_metric_mae += error.mean(dim=0).cpu().numpy()
+            
+            if (i+1) % 20 == 0:
+                print(f"   Processed {i+1}/{num_samples} bodies...")
+
+    print(f"\n✅ Final Results (Synthetic MAE): {total_mae/num_samples:.4f} cm")
+    print("-" * 30)
+    for name, mae in zip(metrics_names, per_metric_mae/num_samples):
+        print(f"{name:12}: {mae:.4f} cm")
+
+if __name__ == "__main__":
+    evaluate()
                 per_metric_counts += mask.sum(dim=0).cpu().numpy()
         
         avg_mae = split_total_mae / max(1, split_num_samples)
