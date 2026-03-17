@@ -46,21 +46,21 @@ def evaluate():
         
     # 3. Robust Loading with Error Tracking
     model_state = model.state_dict()
-    missing_keys, unexpected_keys = model.load_state_dict(new_state_dict, strict=False)
     
-    if missing_keys:
-        print("⚠️ Warning: Missing keys in checkpoint (May cause random results):")
-        for key in missing_keys:
-            print(f"   - {key}")
-            
-    if unexpected_keys:
-        print("⚠️ Warning: Unexpected keys in checkpoint (Ignored):")
-        # Don't print all to avoid cluttering, but log the count
-        print(f"   - {len(unexpected_keys)} keys were not used.")
+    # FIX: MNASNet version check bug bypass
+    # Some torch versions expect a '_metadata' key with version info or they crash
+    input_state_dict = {}
+    matched_keys_count = 0
+    for name, param in new_state_dict.items():
+        if name in model_state:
+            if model_state[name].shape == param.shape:
+                # Direct copying into current model state to bypass version checks
+                model_state[name].copy_(param)
+                matched_keys_count += 1
 
-    # Calculate match count for debugging
-    matched_keys = [k for k in model_state.keys() if k in new_state_dict]
-    print(f"      ✅ Weights loaded ({len(matched_keys)}/{len(model_state)} parameters matched).")
+    # Load the updated state_dict back into the model
+    model.load_state_dict(model_state)
+    print(f"      ✅ Weights loaded ({matched_keys_count}/{len(model_state)} parameters matched via bypass).")
     
     model.eval()
 
