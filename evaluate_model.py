@@ -6,28 +6,11 @@ from network import BMNet
 from dataset import BodyMDataset
 import numpy as np
 
-def evaluate():
-    print("🧪 --- STARTING MODEL EVALUATION --- 🧪")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    # 1. Load Splits
-    kaggle_base = "/kaggle/input/datasets/maamarmohamed/bodym-dataset/bodym"
-    if not os.path.exists(kaggle_base):
-        print(f"❌ Error: Dataset not found at {kaggle_base}")
-        return
-
-    splits = ['testA', 'testB']
-    results = {}
-
-    # 2. Load Model Once
+def load_bm_model(model_path, device):
     model = BMNet().to(device)
-    model_path = "/kaggle/working/models/bmnet_best.pth"
-    if not os.path.exists(model_path):
-        model_path = "/kaggle/working/models/bmnet_latest.pth"
-        
     if not os.path.exists(model_path):
         print(f"❌ Error: No model checkpoint found at {model_path}")
-        return
+        return None
 
     print(f"Loading weights from {model_path}...")
     import warnings
@@ -55,6 +38,28 @@ def evaluate():
     model.load_state_dict(model_state)
     print(f"      ✅ Weights loaded ({matched_keys} parameters matched).")
     model.eval()
+    return model
+
+def evaluate():
+    print("🧪 --- STARTING MODEL EVALUATION --- 🧪")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # 1. Load Splits
+    kaggle_base = "/kaggle/input/datasets/maamarmohamed/bodym-dataset/bodym"
+    if not os.path.exists(kaggle_base):
+        # Local fallback context
+        kaggle_base = "bodym" 
+        if not os.path.exists(kaggle_base):
+            print(f"❌ Error: Dataset not found at {kaggle_base}")
+            return
+
+    splits = ['testA', 'testB']
+    model_paths = [
+        "/kaggle/input/models/maamarmohamed/get-size/other/default/1/bmnet_best.pth",
+        "/kaggle/input/models/maamarmohamed/get-size/other/default/1/bmnet_checkpoint.pth"
+    ]
+    
+    all_model_results = {}
 
     metrics_names = [
         'Ankle', 'Arm-L', 'Bicep', 'Calf', 'Chest', 
@@ -62,77 +67,68 @@ def evaluate():
         'Shoulder-B', 'S-to-C', 'Thigh', 'Waist', 'Wrist'
     ]
 
-    # 3. Evaluation Loop per Split
-    for split in splits:
-        print(f"\n" + "-"*20)
-        print(f"🔍 Evaluating on {split}...")
-        dataset = BodyMDataset(kaggle_base, split=split)
-        if len(dataset) == 0:
-            print(f"⚠️ Warning: Split {split} is empty or not found.")
+    for model_path in model_paths:
+        model_name = os.path.basename(model_path)
+        print(f"\n" + "="*50)
+        print(f"🏆 EVALUATING MODEL: {model_name}")
+        print("="*50)
+        
+        model = load_bm_model(model_path, device)
+        if model is None:
             continue
             
-        print(f"Dataset columns found: {list(dataset.df.columns)[:10]}...")
-        loader = DataLoader(dataset, batch_size=8, shuffle=False, num_workers=2)
-        
-        split_total_mae = 0
-        split_num_samples = 0
-        per_metric_mae = np.zeros(14)
-        per_metric_counts = np.zeros(14)
-        
-        # Diagnostic: Check first sample
-        test_img, test_target = dataset[0]
-        print(f"First Sample Info:")
-        print(f"   - Input Shape: {test_img.shape}")
-        print(f"   - Silh Mean: {test_img[0].mean():.4f} (Should be > 0 if images loaded)")
-        print(f"   - Height Channel Val: {test_img[1, 0, 0]:.4f}")
-        print(f"   - Weight Channel Val: {test_img[2, 0, 0]:.4f}")
+        results = {}
 
-        with torch.no_grad():
-            for i, (images, measurements) in enumerate(loader):
-                images = images.to(device)
-                measurements = measurements.to(device)
-                preds = model(images)
+        # 3. Evaluation Loop per Split
+        for split in splits:
+            print(f"\n🔍 Evaluating {model_name} on {split}...")
+            dataset = BodyMDataset(kaggle_base, split=split)
+            if len(dataset) == 0:
+                print(f"⚠️ Warning: Split {split} is empty or not found.")
+                continue
                 
-                if i == 0:
-                    print(f"First Batch Raw Comparisons:")
-                    print(f"   - Sample 0 Preds:   {preds[0][:5].cpu().numpy()}")
-                    print(f"   - Sample 0 Targets: {measurements[0][:5].cpu().numpy()}")
-                
-                # Mask out zero targets (missing data)
-                mask = (measurements > 0).float()
-                error = torch.abs(preds - measurements) * mask
-                
-                split_total_mae += error.sum().item()
-                split_num_samples += mask.sum().item()
-                
-                per_metric_mae += error.sum(dim=0).cpu().numpy()
-                per_metric_counts += mask.sum(dim=0).cpu().numpy()
-        
-        avg_mae = split_total_mae / max(1, split_num_samples)
-        results[split] = avg_mae
-        print(f"\n✅ {split} MAE: {avg_mae:.4f} cm")
-        
-        print(f"Metric Breakdown (MAE in cm):")
-        for idx, name in enumerate(metrics_names):
-            if per_metric_counts[idx] > 0:
-                m_mae = per_metric_mae[idx] / per_metric_counts[idx]
-                print(f"   {name.ljust(12)}: {m_mae:.2f}")
+            loader = DataLoader(dataset, batch_size=8, shuffle=False, num_workers=2)
+            
+            split_total_mae = 0
+            split_num_samples = 0
+            per_metric_mae = np.zeros(14)
+            per_metric_counts = np.zeros(14)
+            
+            with torch.no_grad():
+                for i, (images, measurements) in enumerate(loader):
+                    images = images.to(device)
+                    measurements = measurements.to(device)
+                    preds = model(images)
+                    
+                    # Mask out zero targets (missing data)
+                    mask = (measurements > 0).float()
+                    error = torch.abs(preds - measurements) * mask
+                    
+                    split_total_mae += error.sum().item()
+                    split_num_samples += mask.sum().item()
+                    
+                    per_metric_mae += error.sum(dim=0).cpu().numpy()
+                    per_metric_counts += mask.sum(dim=0).cpu().numpy()
+            
+            avg_mae = split_total_mae / max(1, split_num_samples)
+            results[split] = avg_mae
+            print(f"✅ {split} MAE: {avg_mae:.4f} cm")
+            
+        all_model_results[model_name] = results
 
-    # 4. Final Summary
-    overall_mae = sum(results.values()) / len(results) if results else 0
-    print("\n" + "="*40)
-    print(f"🏆 OVERALL ACCURACY (MAE): {overall_mae:.4f} cm")
-    for s, m in results.items():
-        print(f"   - {s}: {m:.4f} cm")
-    print("="*40)
+    # 4. Final Comparison Summary
+    print("\n" + "📊" * 20)
+    print("       FINAL COMPARISON SUMMARY")
+    print("📊" * 20)
     
-    print("\nInterpretation:")
-    if overall_mae < 3.0:
-        print("🟢 EXCELLENT: SOTA performance matching the paper.")
-    elif overall_mae < 5.0:
-        print("🟡 GOOD: Very usable for fashion/size recommendation.")
-    else:
-        print("🔴 NEEDS WORK: Model needs more training time.")
-
-if __name__ == "__main__":
-    evaluate()
+    for model_name, results in all_model_results.items():
+        if results:
+            overall_mae = sum(results.values()) / len(results)
+            print(f"\nModel: {model_name}")
+            print(f"Overall MAE: {overall_mae:.4f} cm")
+            for s, m in results.items():
+                print(f"   - {s}: {m:.4f} cm")
+        else:
+            print(f"\nModel: {model_name} - No results available.")
+    
+    print("\n" + "="*40)
