@@ -11,7 +11,7 @@ def evaluate():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # 1. Load Splits
-    kaggle_base = "/kaggle/input/datasets/maamarmohamed/bodym-dataset/bodym"
+    kaggle_base = "/kaggle/input/datasets/maamarmohamed12/bodym-dataset/bodym"
     if not os.path.exists(kaggle_base):
         print(f"❌ Error: Dataset not found at {kaggle_base}")
         return
@@ -21,10 +21,7 @@ def evaluate():
 
     # 2. Load Model Once
     model = BMNet().to(device)
-    model_path = "/kaggle/working/models/bmnet_best.pth"
-    if not os.path.exists(model_path):
-        model_path = "/kaggle/working/models/bmnet_latest.pth"
-        
+    model_path = "/kaggle/input/models/maamarmohamed12/get-size/other/default/1/bmnet_checkpoint.pth"
     if not os.path.exists(model_path):
         print(f"❌ Error: No model checkpoint found at {model_path}")
         return
