@@ -40,7 +40,7 @@ def train_bmnet():
     criterion = nn.L1Loss()
     
     # 3. Data Loaders (Kaggle Integration)
-    kaggle_base = '/kaggle/input/datasets/maamarmohamed/bodym-dataset/bodym'
+    kaggle_base = '/kaggle/input/datasets/maamarmohamed12/bodym-dataset/bodym'
     
     if os.path.exists(kaggle_base):
         train_dataset = BodyMDataset(base_dir=kaggle_base, split='train')
