@@ -6,11 +6,28 @@ from network import BMNet
 from dataset import BodyMDataset
 import numpy as np
 
-def load_bm_model(model_path, device):
+def evaluate():
+    print("🧪 --- STARTING MODEL EVALUATION --- 🧪")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # 1. Load Splits
+    kaggle_base = "/kaggle/input/datasets/maamarmohamed/bodym-dataset/bodym"
+    if not os.path.exists(kaggle_base):
+        print(f"❌ Error: Dataset not found at {kaggle_base}")
+        return
+
+    splits = ['testA', 'testB']
+    results = {}
+
+    # 2. Load Model Once
     model = BMNet().to(device)
+    model_path = "/kaggle/working/models/bmnet_best.pth"
     if not os.path.exists(model_path):
-        print(f" Error: No model checkpoint found at {model_path}")
-        return None
+        model_path = "/kaggle/working/models/bmnet_latest.pth"
+        
+    if not os.path.exists(model_path):
+        print(f"❌ Error: No model checkpoint found at {model_path}")
+        return
 
     print(f"Loading weights from {model_path}...")
     import warnings
@@ -19,8 +36,8 @@ def load_bm_model(model_path, device):
     checkpoint = torch.load(model_path, map_location=device)
     
     # Check if the checkpoint is a dict containing 'model_state_dict' or the state_dict itself
-    if isinstance(checkpoint, dict) and ('model_state_dict' in checkpoint or 'state_dict' in checkpoint):
-        state_dict = checkpoint.get('model_state_dict', checkpoint.get('state_dict'))
+    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+        state_dict = checkpoint['model_state_dict']
     else:
         state_dict = checkpoint
         
@@ -34,140 +51,88 @@ def load_bm_model(model_path, device):
             if model_state[name].shape == param.shape:
                 model_state[name].copy_(param)
                 matched_keys += 1
-            else:
-                print(f" Shape mismatch for {name}: {model_state[name].shape} vs {param.shape}")
     
     model.load_state_dict(model_state)
-    print(f"       Weights loaded ({matched_keys} parameters matched).")
+    print(f"      ✅ Weights loaded ({matched_keys} parameters matched).")
     model.eval()
-    return model
 
-def evaluate():
-    print(" --- STARTING MODEL EVALUATION --- ")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    # 1. Load Splits
-    kaggle_base = "/kaggle/input/datasets/maamarmohamed12/bodym-dataset/bodym"
-    if not os.path.exists(kaggle_base):
-        print(f"Checking for dataset at: {kaggle_base}")
-        # Local fallback context
-        kaggle_base = "bodym" 
-        if not os.path.exists(kaggle_base):
-            print(f" Error: Dataset not found at {kaggle_base} or fallback.")
-            return
-
-    splits = ['train']
-    model_paths = [
-        "/kaggle/input/models/maamarmohamed12/get-size/other/default/1/bmnet_best.pth",
-        "/kaggle/input/models/maamarmohamed12/get-size/other/default/1/bmnet_checkpoint.pth"
+    metrics_names = [
+        'Ankle', 'Arm-L', 'Bicep', 'Calf', 'Chest', 
+        'Forearm', 'H2H (Height)', 'Hip', 'Leg-L', 
+        'Shoulder-B', 'S-to-C', 'Thigh', 'Waist', 'Wrist'
     ]
-    
-    all_model_results = {}
 
-    for model_path in model_paths:
-        model_name = os.path.basename(model_path)
-        print(f"\n" + "="*50)
-        print(f"🏆 EVALUATING MODEL: {model_name}")
-        print(f"📂 Path: {model_path}")
-        print("="*50)
-        
-        try:
-            # We must re-instantiate the model to clear state between evaluations
-            model = load_bm_model(model_path, device)
-            if model is None:
-                print(f"⚠️ Model load returned None for {model_path}")
-                continue
-        except Exception as e:
-            print(f"❌ CRITICAL ERROR loading {model_name}: {str(e)}")
+    # 3. Evaluation Loop per Split
+    for split in splits:
+        print(f"\n" + "-"*20)
+        print(f"🔍 Evaluating on {split}...")
+        dataset = BodyMDataset(kaggle_base, split=split)
+        if len(dataset) == 0:
+            print(f"⚠️ Warning: Split {split} is empty or not found.")
             continue
             
-        results = {}
+        print(f"Dataset columns found: {list(dataset.df.columns)[:10]}...")
+        loader = DataLoader(dataset, batch_size=8, shuffle=False, num_workers=2)
+        
+        split_total_mae = 0
+        split_num_samples = 0
+        per_metric_mae = np.zeros(14)
+        per_metric_counts = np.zeros(14)
+        
+        # Diagnostic: Check first sample
+        test_img, test_target = dataset[0]
+        print(f"First Sample Info:")
+        print(f"   - Input Shape: {test_img.shape}")
+        print(f"   - Silh Mean: {test_img[0].mean():.4f} (Should be > 0 if images loaded)")
+        print(f"   - Height Channel Val: {test_img[1, 0, 0]:.4f}")
+        print(f"   - Weight Channel Val: {test_img[2, 0, 0]:.4f}")
 
-        # 3. Evaluation Loop per Split
-        for split in splits:
-            print(f"\n🔍 Evaluating {model_name} on {split}...")
-            try:
-                # Reload dataset per model evaluation to be safe
-                dataset = BodyMDataset(kaggle_base, split=split)
+        with torch.no_grad():
+            for i, (images, measurements) in enumerate(loader):
+                images = images.to(device)
+                measurements = measurements.to(device)
+                preds = model(images)
                 
-                # Limit train split evaluation to 1000 samples for speed if it's the main dataset
-                if split == 'train' and len(dataset) > 1000:
-                    print(f"   Note: Subsampling 1000 samples from train for comparison.")
-                    # Workaround for Subset indexing bug with DataLoaders in older PyTorch versions
-                    # We create a new dataset with just a chunk to avoid TypeErrors with '.iloc'
-                    indices = torch.randperm(len(dataset))[:1000].tolist()
-                    dataset.df = dataset.df.iloc[indices].reset_index(drop=True)
+                if i == 0:
+                    print(f"First Batch Raw Comparisons:")
+                    print(f"   - Sample 0 Preds:   {preds[0][:5].cpu().numpy()}")
+                    print(f"   - Sample 0 Targets: {measurements[0][:5].cpu().numpy()}")
+                
+                # Mask out zero targets (missing data)
+                mask = (measurements > 0).float()
+                error = torch.abs(preds - measurements) * mask
+                
+                split_total_mae += error.sum().item()
+                split_num_samples += mask.sum().item()
+                
+                per_metric_mae += error.sum(dim=0).cpu().numpy()
+                per_metric_counts += mask.sum(dim=0).cpu().numpy()
+        
+        avg_mae = split_total_mae / max(1, split_num_samples)
+        results[split] = avg_mae
+        print(f"\n✅ {split} MAE: {avg_mae:.4f} cm")
+        
+        print(f"Metric Breakdown (MAE in cm):")
+        for idx, name in enumerate(metrics_names):
+            if per_metric_counts[idx] > 0:
+                m_mae = per_metric_mae[idx] / per_metric_counts[idx]
+                print(f"   {name.ljust(12)}: {m_mae:.2f}")
 
-                if len(dataset) == 0:
-                    print(f"⚠️ Warning: Split {split} is empty or not found.")
-                    continue
-                    
-                loader = DataLoader(dataset, batch_size=8, shuffle=False, num_workers=2)
-                
-                split_total_mae = 0
-                split_num_samples = 0
-                
-                # Tracking per-target MAE
-                target_names = dataset.target_cols
-                per_target_mae = torch.zeros(len(target_names)).to(device)
-                per_target_counts = torch.zeros(len(target_names)).to(device)
-                
-                with torch.no_grad():
-                    for i, (images, measurements) in enumerate(loader):
-                        images = images.to(device)
-                        measurements = measurements.to(device)
-                        preds = model(images)
-                        
-                        # Debug first batch predictions vs targets
-                        if i == 0:
-                            print(f"\n--- DEBUG SAMPLE (First Batch, First Item) ---")
-                            for idx, name in enumerate(target_names):
-                                p, t = preds[0, idx].item(), measurements[0, idx].item()
-                                print(f" {name:20}: Pred {p:6.2f} | GT {t:6.2f} | Diff {abs(p-t):6.2f}")
-                            print("-" * 47 + "\n")
-
-                        # Mask out zero targets (missing data)
-                        mask = (measurements > 0).float()
-                        error = torch.abs(preds - measurements) * mask
-                        
-                        per_target_mae += error.sum(dim=0)
-                        per_target_counts += mask.sum(dim=0)
-                        
-                        split_total_mae += error.sum().item()
-                        split_num_samples += mask.sum().item()
-                
-                if split_num_samples > 0:
-                    avg_mae = split_total_mae / split_num_samples
-                    results[split] = avg_mae
-                    print(f" {split} OVERALL MAE: {avg_mae:.4f} cm")
-                    
-                    print("\n--- PER-TARGET MAE BREAKDOWN ---")
-                    for idx, name in enumerate(target_names):
-                        if per_target_counts[idx] > 0:
-                            t_mae = (per_target_mae[idx] / per_target_counts[idx]).item()
-                            print(f" {name:25}: {t_mae:6.2f} cm")
-                    print("-" * 35)
-                else:
-                    print(f" No valid samples in {split}")
-            except Exception as e:
-                print(f" Error during split {split} evaluation: {str(e)}")
-            
-        all_model_results[model_name] = results
-
-    # 4. Final Comparison Summary
-    print("\n" + "" * 20)
-    print("       FINAL COMPARISON SUMMARY")
-    print("" * 20)
-    
-    for model_name, results in all_model_results.items():
-        if results:
-            overall_mae = sum(results.values()) / len(results)
-            print(f"\nModel: {model_name}")
-            print(f"Overall MAE: {overall_mae:.4f} cm")
-            for s, m in results.items():
-                print(f"   - {s}: {m:.4f} cm")
-    
+    # 4. Final Summary
+    overall_mae = sum(results.values()) / len(results) if results else 0
     print("\n" + "="*40)
+    print(f"🏆 OVERALL ACCURACY (MAE): {overall_mae:.4f} cm")
+    for s, m in results.items():
+        print(f"   - {s}: {m:.4f} cm")
+    print("="*40)
+    
+    print("\nInterpretation:")
+    if overall_mae < 3.0:
+        print("🟢 EXCELLENT: SOTA performance matching the paper.")
+    elif overall_mae < 5.0:
+        print("🟡 GOOD: Very usable for fashion/size recommendation.")
+    else:
+        print("🔴 NEEDS WORK: Model needs more training time.")
 
 if __name__ == "__main__":
     evaluate()
