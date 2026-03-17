@@ -36,9 +36,22 @@ def evaluate():
         name = k[7:] if k.startswith('module.') else k
         new_state_dict[name] = v
         
-    model.load_state_dict(new_state_dict, strict=False)
     model.eval()
 
+    # FIX: MNASNet version check bug bypass
+    # Torchvision's MNASNet has a strict version check that fails when loading 
+    # weights from different torch versions. We bypass it by copying manually.
+    model_state = model.state_dict()
+    matched_keys_count = 0
+    for name, param in new_state_dict.items():
+        if name in model_state:
+            if model_state[name].shape == param.shape:
+                model_state[name].copy_(param)
+                matched_keys_count += 1
+    
+    model.load_state_dict(model_state)
+    print(f"      ✅ Weights loaded ({matched_keys_count}/{len(model_state)} parameters matched via bypass).")
+    
     metrics_names = [
         'Ankle', 'Arm-L', 'Bicep', 'Calf', 'Chest', 
         'Forearm', 'H2H', 'Hip', 'Leg-L', 
