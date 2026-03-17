@@ -60,13 +60,21 @@ class BodyMDataset(Dataset):
             'waist_cm': 'waist_cm',
             'wrist_cm': 'wrist_cm'
         }
+        
+        # FIX: The dataset was incorrectly mapping head_to_heel, shoulder_breadth, and shoulder_to_crotch
+        # to 'height_cm' in many CSVs, causing massive MAE. 
+        # We need to ensure that IF height_cm is the only thing found, we don't overwrite valid indices
+        # or we use more specific column matches.
         self.target_cols = list(self.target_map.keys())
 
         # Ensure all columns exist in DF (fill with 0 if missing)
         for target, src in self.target_map.items():
             if src not in self.df.columns:
-                # Try common aliases
-                aliases = [src.replace('_cm', ''), src.replace('width', 'breadth'), 'height_cm']
+                # Try common aliases but EXCLUDE 'height_cm' for breadths/lengths
+                aliases = [src.replace('_cm', ''), src.replace('width', 'breadth')]
+                if target == 'head_to_heel_cm':
+                    aliases.append('height_cm')
+                
                 found = False
                 for a in aliases:
                     if a in self.df.columns:
