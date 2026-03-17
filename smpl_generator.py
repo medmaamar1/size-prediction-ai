@@ -21,8 +21,10 @@ class SMPLDataGenerator:
         }
         
         # Kaggle-specific source path (Read-only)
-        # Updated to the new model location provided by user
-        KAGGLE_SRC = "/kaggle/input/models/maamarmohamed12/smpl-generator/other/default/1/SMPL_python_v.1.1.0/smpl/models"
+        # Updated to the new BMNet model locations provided by user
+        KAGGLE_SRC = "/kaggle/input/models/maamarmohamed12/ai-model/pytorch/default/1"
+        BMNET_BEST_PATH = "/kaggle/input/models/maamarmohamed12/ai-model/pytorch/default/1/bmnet_best.pth"
+        BMNET_CHECKPOINT_PATH = "/kaggle/input/models/maamarmohamed12/ai-model/pytorch/default/1/bmnet_checkpoint.pth"
         
         # Local writable path for symlinking with standard names
         # smplx expects a subfolder named 'smpl' for model_type='smpl'
