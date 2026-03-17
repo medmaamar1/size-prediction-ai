@@ -21,12 +21,19 @@ class SMPLDataGenerator:
         }
         
         # Kaggle-specific source path (Read-only)
-        KAGGLE_SRC = "/kaggle/input/datasets/maamarmohamed/smpl-generator/SMPL_python_v.1.1.0/smpl/models"
+        # Updated to the new model location provided by user
+        KAGGLE_SRC = "/kaggle/input/models/maamarmohamed12/smpl-generator/other/default/1/SMPL_python_v.1.1.0/smpl/models"
         
         # Local writable path for symlinking with standard names
         # smplx expects a subfolder named 'smpl' for model_type='smpl'
         KAGGLE_WORKING = "/kaggle/working/smpl_models"
         KAGGLE_SMPL_DIR = os.path.join(KAGGLE_WORKING, "smpl")
+
+        # Define model source mappings
+        mappings = {
+            'female':  "basicmodel_f_lbs_10_207_0_v1.1.0.pkl",
+            'male':    "basicmodel_m_lbs_10_207_0_v1.1.0.pkl"
+        }
 
         if model_path is None:
             if os.path.exists(KAGGLE_SRC):
@@ -34,11 +41,6 @@ class SMPLDataGenerator:
                 os.makedirs(KAGGLE_SMPL_DIR, exist_ok=True)
                 
                 # 2. Map the "basicmodel" files to standard SMPL names
-                mappings = {
-                    'female':  "basicmodel_f_lbs_10_207_0_v1.1.0.pkl",
-                    'male':    "basicmodel_m_lbs_10_207_0_v1.1.0.pkl"
-                }
-                
                 src = os.path.join(KAGGLE_SRC, mappings.get(gender, list(mappings.values())[0]))
                 dst = os.path.join(KAGGLE_SMPL_DIR, MODEL_NAMES.get(gender, list(MODEL_NAMES.values())[0]))
                 
@@ -66,12 +68,13 @@ class SMPLDataGenerator:
             try:
                 # Ensure the symlinks exist for all genders
                 dst = os.path.join(KAGGLE_SMPL_DIR, MODEL_NAMES[g])
-                src = os.path.join(KAGGLE_SRC, mappings[g])
-                if os.path.exists(src) and not os.path.exists(dst):
-                    try: os.symlink(src, dst)
-                    except: 
-                        import shutil
-                        shutil.copy(src, dst)
+                if os.path.exists(KAGGLE_SRC):
+                    src = os.path.join(KAGGLE_SRC, mappings[g])
+                    if os.path.exists(src) and not os.path.exists(dst):
+                        try: os.symlink(src, dst)
+                        except: 
+                            import shutil
+                            shutil.copy(src, dst)
                 
                 self.models[g] = smplx.create(model_dir, model_type='smpl', gender=g, ext='pkl').to(self.device).eval()
             except Exception as e:
