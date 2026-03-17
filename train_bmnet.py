@@ -60,7 +60,7 @@ def build_real_beta_pool(train_subset, smpl_gen, device):
         beta = torch.zeros(1, 10, device=device, requires_grad=True)
         opt  = optim.Adam([beta], lr=0.05)
 
-        for _ in range(30):
+        for _ in range(10):   # 10 steps is enough for ABS initialization
             opt.zero_grad()
             _, gt_synth, _ = smpl_gen.generate_batch(beta)
             loss = crit(gt_synth, gt_meas)
@@ -344,13 +344,19 @@ def train_bmnet():
     h_path         = os.path.join(output_dir, "h_regressor.pth")
 
     if not dummy_fallback:
-        # β pool
+        # β pool — fit SMPL to a random subset (500 subjects is enough diversity)
+        # Fitting all subjects takes too long and is not necessary
         if os.path.exists(beta_pool_path):
             beta_pool = torch.load(beta_pool_path, map_location='cpu')
             print(f"--- Loaded cached beta pool: {beta_pool.shape} ---")
         else:
+            # Sample 500 random subjects from the training subset
+            pool_size   = min(500, len(train_subset))
+            pool_indices = torch.randperm(len(train_subset))[:pool_size]
+            pool_subset  = torch.utils.data.Subset(train_subset, pool_indices)
+            print(f"--- Fitting beta pool on {pool_size} subjects (sampled from {len(train_subset)}) ---")
             beta_pool, heights_t, weights_t = build_real_beta_pool(
-                train_subset, smpl_gen, device
+                pool_subset, smpl_gen, device
             )
             torch.save(beta_pool, beta_pool_path)
             torch.save({'heights': heights_t, 'weights': weights_t},
