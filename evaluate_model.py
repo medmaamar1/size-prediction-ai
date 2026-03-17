@@ -47,10 +47,11 @@ def evaluate():
     # 1. Load Splits
     kaggle_base = "/kaggle/input/datasets/maamarmohamed12/bodym-dataset/bodym"
     if not os.path.exists(kaggle_base):
+        print(f"Checking for dataset at: {kaggle_base}")
         # Local fallback context
         kaggle_base = "bodym" 
         if not os.path.exists(kaggle_base):
-            print(f"❌ Error: Dataset not found at {kaggle_base}")
+            print(f"❌ Error: Dataset not found at {kaggle_base} or fallback.")
             return
 
     splits = ['testA', 'testB']
@@ -71,10 +72,16 @@ def evaluate():
         model_name = os.path.basename(model_path)
         print(f"\n" + "="*50)
         print(f"🏆 EVALUATING MODEL: {model_name}")
+        print(f"📂 Path: {model_path}")
         print("="*50)
         
-        model = load_bm_model(model_path, device)
-        if model is None:
+        try:
+            model = load_bm_model(model_path, device)
+            if model is None:
+                print(f"⚠️ Model load returned None for {model_path}")
+                continue
+        except Exception as e:
+            print(f"❌ CRITICAL ERROR loading {model_name}: {str(e)}")
             continue
             
         results = {}
@@ -82,22 +89,53 @@ def evaluate():
         # 3. Evaluation Loop per Split
         for split in splits:
             print(f"\n🔍 Evaluating {model_name} on {split}...")
-            dataset = BodyMDataset(kaggle_base, split=split)
-            if len(dataset) == 0:
-                print(f"⚠️ Warning: Split {split} is empty or not found.")
-                continue
+            try:
+                dataset = BodyMDataset(kaggle_base, split=split)
+                print(f"   Found {len(dataset)} samples in {split}")
+                if len(dataset) == 0:
+                    print(f"⚠️ Warning: Split {split} is empty or not found.")
+                    continue
+                    
+                loader = DataLoader(dataset, batch_size=8, shuffle=False, num_workers=2)
                 
-            loader = DataLoader(dataset, batch_size=8, shuffle=False, num_workers=2)
+                split_total_mae = 0
+                split_num_samples = 0
+                per_metric_mae = np.zeros(14)
+                per_metric_counts = np.zeros(14)
+                
+                with torch.no_grad():
+                    for i, (images, measurements) in enumerate(loader):
+                        images = images.to(device)
+                        measurements = measurements.to(device)
+                        preds = model(images)
+                        
+                        # Mask out zero targets (missing data)
+                        mask = (measurements > 0).float()
+                        error = torch.abs(preds - measurements) * mask
+                        
+                        split_total_mae += error.sum().item()
+                        split_num_samples += mask.sum().item()
+                        
+                        per_metric_mae += error.sum(dim=0).cpu().numpy()
+                        per_metric_counts += mask.sum(dim=0).cpu().numpy()
+                
+                if split_num_samples > 0:
+                    avg_mae = split_total_mae / split_num_samples
+                    results[split] = avg_mae
+                    print(f"✅ {split} MAE: {avg_mae:.4f} cm")
+                else:
+                    print(f"⚠️ No valid samples (mask sum is 0) in {split}")
+            except Exception as e:
+                print(f"❌ Error during split {split} evaluation: {str(e)}")
+                import traceback
+                traceback.print_exc()
             
-            split_total_mae = 0
-            split_num_samples = 0
-            per_metric_mae = np.zeros(14)
-            per_metric_counts = np.zeros(14)
-            
-            with torch.no_grad():
-                for i, (images, measurements) in enumerate(loader):
-                    images = images.to(device)
-                    measurements = measurements.to(device)
+        all_model_results[model_name] = results
+
+    # 4. Final Comparison Summary
+    print("\n" + "📊" * 20)
+    print("       FINAL COMPARISON SUMMARY")
+    print("📊" * 20)
                     preds = model(images)
                     
                     # Mask out zero targets (missing data)
