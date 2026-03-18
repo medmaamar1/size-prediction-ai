@@ -13,7 +13,7 @@ def evaluate():
     # 1. Load Model
     model = BMNet().to(device)
     # Target the specific user-provided model file
-    model_path = "/kaggle/input/models/maamarmohamed12/phase1-please/pytorch/default/1/bmnet_phase1_best.pth"
+    model_path = "/kaggle/input/models/almohamed132/smpl-generator/other/default/1/bmnet_best.pth"
     
     if not os.path.exists(model_path):
         print(f"❌ Error: No model checkpoint found at {model_path}")
@@ -46,7 +46,7 @@ def evaluate():
     model.eval()
 
     # 2. Setup Test-A Dataset
-    kaggle_base = "/kaggle/input/datasets/maamarmohamed12/bodym-dataset/bodym"
+    kaggle_base = "/kaggle/input/datasets/almohamed132/bodym-dataset/bodym"
     split = 'testA'
     
     if not os.path.exists(kaggle_base):

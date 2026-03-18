@@ -17,16 +17,16 @@ from smpl_generator import SMPLDataGenerator
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HEARTBEAT: prints every 30 min to prevent Kaggle inactivity disconnect
+# HEARTBEAT: prints every 10 min to prevent Kaggle inactivity disconnect
 # ─────────────────────────────────────────────────────────────────────────────
-def start_heartbeat(interval_seconds=1800):
+def start_heartbeat(interval_seconds=600):
     def beat():
         while True:
             time.sleep(interval_seconds)
-            print(f"[HEARTBEAT] Still training... {time.strftime('%H:%M:%S')}", flush=True)
+            print(f"[HEARTBEAT] Still training... Phase might be running a long batch. Time: {time.strftime('%H:%M:%S')}", flush=True)
     t = threading.Thread(target=beat, daemon=True)
     t.start()
-    print("✅ Heartbeat started (prints every 30 min to prevent Kaggle timeout)")
+    print("✅ Heartbeat started (prints every 10 min to prevent Kaggle timeout)")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPER: fit SMPL betas to each subject in the 90% training subset.
@@ -277,8 +277,8 @@ def train_bmnet():
     output_dir        = "/kaggle/working/models"
     os.makedirs(output_dir, exist_ok=True)
 
-    kaggle_base       = '/kaggle/input/datasets/maamarmohamed12/bodym-dataset/bodym'
-    kaggle_checkpoint = "/kaggle/input/models/maamarmohamed12/get-size/other/default/1/bmnet_best.pth"
+    kaggle_base       = '/kaggle/input/datasets/almohamed132/bodym-dataset/bodym'
+    kaggle_checkpoint = "/kaggle/input/models/almohamed132/smpl-generator/other/default/1/bmnet_best.pth"
     local_checkpoint  = os.path.join(output_dir, "bmnet_checkpoint.pth")
 
     # ── Model & optimiser ─────────────────────────────────────────────────

@@ -227,7 +227,7 @@ def run_comprehensive_test():
     # STAGE 8: Dataset loading + input tensor format
     # ─────────────────────────────────────────────────────────────────
     section("STAGE 8 — Dataset Loading & Input Format")
-    kaggle_base = '/kaggle/input/datasets/maamarmohamed12/bodym-dataset/bodym'
+    kaggle_base = '/kaggle/input/datasets/almohamed132/bodym-dataset/bodym'
     try:
         import os
         if not os.path.exists(kaggle_base):
