@@ -13,7 +13,7 @@ def evaluate():
     # 1. Load Model
     model = BMNet().to(device)
     # Target the specific user-provided model file
-    model_path = "/kaggle/input/models/almohamed132/smpl-generator/other/default/1/bmnet_best.pth"
+    model_path = "/kaggle/working/models/bmnet_phase1_best.pth"
     
     if not os.path.exists(model_path):
         print(f"❌ Error: No model checkpoint found at {model_path}")
