@@ -405,6 +405,14 @@ def train_bmnet():
         dummy_targets = torch.zeros(batch_size, 14, device=device)
 
     iteration = start_iter
+    
+    # ── RESUME CHECK: If Phase 1 best file exists, we can jump straight towards Phase 2 ─
+    phase1_best = os.path.join(output_dir, "bmnet_phase1_best.pth")
+    if iteration == 0 and os.path.exists(phase1_best):
+        print("--- PHASE 1 Best file found, jumping towards Phase 2 fine-tuning! ---")
+        iteration = phase1_iterations
+    elif iteration >= phase1_iterations:
+        print(f"--- Iteration {iteration:,} >= {phase1_iterations:,}, Phase 1 already complete. ---")
 
     while iteration < phase1_iterations:
         data_iter = (iter([(dummy_images, dummy_targets)])
