@@ -278,7 +278,7 @@ def train_bmnet():
     os.makedirs(output_dir, exist_ok=True)
 
     kaggle_base       = '/kaggle/input/datasets/almohamed132/bodym-dataset/bodym'
-    kaggle_checkpoint = "/kaggle/working/models/bmnet_phase1_best.pth"
+    kaggle_checkpoint = "/kaggle/input/models/almohamed132/best-model-v1/pytorch/default/1/bmnet_phase1_best (1).pth"
     local_checkpoint  = os.path.join(output_dir, "bmnet_checkpoint.pth")
 
     # ── Model & optimiser ─────────────────────────────────────────────────
@@ -406,10 +406,11 @@ def train_bmnet():
 
     iteration = start_iter
     
-    # ── RESUME CHECK: If Phase 1 best file exists, we can jump straight towards Phase 2 ─
-    phase1_best = os.path.join(output_dir, "bmnet_phase1_best.pth")
-    if iteration == 0 and os.path.exists(phase1_best):
-        print("--- PHASE 1 Best file found, jumping towards Phase 2 fine-tuning! ---")
+    # ── RESUME CHECK: If any Phase 1 best file exists, we can jump straight towards Phase 2 ─
+    local_p1_best = os.path.join(output_dir, "bmnet_phase1_best.pth")
+    if iteration == 0 and (os.path.exists(local_p1_best) or os.path.exists(kaggle_checkpoint)):
+        print(f"--- Phase 1 model found at {local_p1_best if os.path.exists(local_p1_best) else kaggle_checkpoint} ---")
+        print("--- Jumping towards Phase 2 fine-tuning! ---")
         iteration = phase1_iterations
     elif iteration >= phase1_iterations:
         print(f"--- Iteration {iteration:,} >= {phase1_iterations:,}, Phase 1 already complete. ---")
