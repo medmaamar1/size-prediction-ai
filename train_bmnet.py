@@ -277,8 +277,8 @@ def train_bmnet():
     output_dir        = "/kaggle/working/models"
     os.makedirs(output_dir, exist_ok=True)
 
-    kaggle_base       = '/kaggle/input/datasets/almohamed132/bodym-dataset/bodym'
-    kaggle_checkpoint = "/kaggle/input/models/almohamed132/best-model-v1/pytorch/default/1/bmnet_phase1_best (1).pth"
+    kaggle_base       = '/kaggle/input/datasets/maamarmohamed/bodym-dataset/bodym'
+    kaggle_checkpoint = "/kaggle/input/models/maamarmohamed/best-model-v1/pytorch/default/1/bmnet_phase1_best (1).pth"
     local_checkpoint  = os.path.join(output_dir, "bmnet_checkpoint.pth")
 
     # ── Model & optimiser ─────────────────────────────────────────────────

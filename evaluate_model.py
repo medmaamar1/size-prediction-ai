@@ -46,7 +46,7 @@ def evaluate():
     model.eval()
 
     # 2. Setup Test-A Dataset
-    kaggle_base = "/kaggle/input/datasets/almohamed132/bodym-dataset/bodym"
+    kaggle_base = "/kaggle/input/datasets/maamarmohamed/bodym-dataset/bodym"
     split = 'testA'
     
     if not os.path.exists(kaggle_base):
