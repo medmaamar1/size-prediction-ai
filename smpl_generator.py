@@ -53,7 +53,7 @@ class SMPLDataGenerator:
             'female': 'SMPL_FEMALE.pkl',
             'male':   'SMPL_MALE.pkl',
         }
-        KAGGLE_SRC     = "/kaggle/input/datasets/maamarmohamed/smpl-generator"
+        KAGGLE_SRC     = "/kaggle/input/models/maamarmohamed/smpl-model/other/default/1/SMPL_python_v.1.1.0"
         KAGGLE_WORKING = "/kaggle/working/smpl_models"
         KAGGLE_SMPL_DIR = os.path.join(KAGGLE_WORKING, "smpl")
         mappings = {
