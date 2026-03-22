@@ -53,7 +53,7 @@ class SMPLDataGenerator:
             'female': 'SMPL_FEMALE.pkl',
             'male':   'SMPL_MALE.pkl',
         }
-        KAGGLE_SRC     = "/kaggle/input/models/maamarmohamed/smpl-model/other/default/1/SMPL_python_v.1.1.0"
+        KAGGLE_SRC     = "/kaggle/input/models/maamarmohamed/smpl-model/other/default/1/SMPL_python_v.1.1.0/smpl/models"
         KAGGLE_WORKING = "/kaggle/working/smpl_models"
         KAGGLE_SMPL_DIR = os.path.join(KAGGLE_WORKING, "smpl")
         mappings = {
@@ -64,40 +64,15 @@ class SMPLDataGenerator:
         if model_path is None:
             if os.path.exists(KAGGLE_SRC):
                 os.makedirs(KAGGLE_SMPL_DIR, exist_ok=True)
-                
-                # Helper to find file by name recursively
-                def find_file(root_dir, filename):
-                    for dirpath, _, filenames in os.walk(root_dir):
-                        if filename in filenames:
-                            return os.path.join(dirpath, filename)
-                    return None
-                
                 for g in ['female', 'male']:
-                    # Try to find exactly the mappings name, or else ANY female/male pkl if mappings fails
-                    target_file = mappings[g]
-                    src = find_file(KAGGLE_SRC, target_file)
-                    
-                    if not src:
-                        # Fallback heuristic: look for any .pkl with 'basicmodel_f' or 'basicmodel_m'
-                        heuristic = 'basicmodel_f' if g == 'female' else 'basicmodel_m'
-                        for dirpath, _, filenames in os.walk(KAGGLE_SRC):
-                            for f in filenames:
-                                if f.startswith(heuristic) and f.endswith('.pkl'):
-                                    src = os.path.join(dirpath, f)
-                                    break
-                            if src: break
-                    
+                    src = os.path.join(KAGGLE_SRC, mappings[g])
                     dst = os.path.join(KAGGLE_SMPL_DIR, MODEL_NAMES[g])
-                    if src and os.path.exists(src) and not os.path.exists(dst):
-                        print(f"[{g}] Found SMPL model at: {src}")
+                    if os.path.exists(src) and not os.path.exists(dst):
                         try:
                             os.symlink(src, dst)
                         except Exception:
                             import shutil
                             shutil.copy(src, dst)
-                    elif not src:
-                        print(f"[{g}] Warning: SMPL model file for {g} not found in {KAGGLE_SRC}!")
-                
                 model_dir = KAGGLE_WORKING
             else:
                 model_dir = "smpl_models"
@@ -109,11 +84,15 @@ class SMPLDataGenerator:
         self.models = {}
         for g in ['female', 'male']:
             try:
-                # the copy was already established above, we just need to load it
                 dst = os.path.join(KAGGLE_SMPL_DIR, MODEL_NAMES[g])
-                if not os.path.exists(dst):
-                   print(f"Warning: Destination {dst} does not exist, loading may fail.") 
-                
+                if os.path.exists(KAGGLE_SRC):
+                    src = os.path.join(KAGGLE_SRC, mappings[g])
+                    if os.path.exists(src) and not os.path.exists(dst):
+                        try:
+                            os.symlink(src, dst)
+                        except Exception:
+                            import shutil
+                            shutil.copy(src, dst)
                 self.models[g] = smplx.create(
                     model_dir, model_type='smpl', gender=g, ext='pkl'
                 ).to(self.device).eval()
@@ -121,7 +100,7 @@ class SMPLDataGenerator:
                 print(f"Warning: Could not load {g} SMPL model: {e}")
 
         if not self.models:
-            raise RuntimeError(f"Could not load any SMPL models from {KAGGLE_SRC}. Ensure the .pkl files are available.")
+            raise RuntimeError("Could not load any SMPL models.")
 
         self.faces = self.models[list(self.models.keys())[0]].faces
 
